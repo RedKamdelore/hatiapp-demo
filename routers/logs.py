@@ -147,9 +147,10 @@ def logs_day(date_str: str, request: Request, db: Session = Depends(get_db)):
     not_booked = _get_not_booked(db, target_date)
 
     # Слоты этого дня
-    if user.role == ROLE_LEADER and user.direction:
+    if user.role == ROLE_LEADER and user.led_directions:
+        leader_dir = user.led_directions[0].direction
         slots = db.query(models.Slot).filter(
-            models.Slot.direction_id == user.direction.id,
+            models.Slot.direction_id == leader_dir.id,
             models.Slot.date == target_date,
             models.Slot.capacity > 0,
         ).order_by(models.Slot.time).all()
