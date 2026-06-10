@@ -14,7 +14,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import models
 from database import engine
 from services.rate_limit import limiter
+from services.auth import hash_password
 from routers import auth, schedule, leader, admin, profile, chat, sse, logs, slots
+from database import SessionLocal
 
 
 templates = Jinja2Templates(directory="templates")
@@ -54,6 +56,38 @@ app.include_router(chat.router)
 app.include_router(sse.router)
 app.include_router(logs.router)
 app.include_router(slots.router)
+
+
+@app.get("/seed")
+def seed_data():
+    """Создаёт тестовых пользователей (только если их ещё нет)."""
+    db = SessionLocal()
+    try:
+        # Проверяем, есть ли уже пользователи
+        existing = db.query(models.User).first()
+        if existing:
+            return {"status": "already_seeded", "message": "Пользователи уже существуют"}
+
+        test_users = [
+            {"username": "admin", "password": "admin", "role": "admin", "full_name": "Администратор"},
+            {"username": "leader", "password": "leader", "role": "leader", "full_name": "Руководитель"},
+            {"username": "volunteer", "password": "volunteer", "role": "volunteer", "full_name": "Волонтёр"},
+        ]
+
+        for u in test_users:
+            user = models.User(
+                username=u["username"],
+                password_hash=hash_password(u["password"]),
+                role=u["role"],
+                full_name=u["full_name"],
+                is_active=True,
+            )
+            db.add(user)
+
+        db.commit()
+        return {"status": "ok", "users": [u["username"] for u in test_users]}
+    finally:
+        db.close()
 
 
 @app.get("/sw.js")
