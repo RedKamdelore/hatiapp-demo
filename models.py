@@ -89,19 +89,23 @@ class ChatRead(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
-    id          = Column(Integer, primary_key=True)
-    sender_id   = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    text        = Column(Text, nullable=False)
-    created_at  = Column(DateTime, server_default=func.now(), index=True)
+    id            = Column(Integer, primary_key=True)
+    sender_id     = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    receiver_id   = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    text          = Column(Text, nullable=False)
+    attachment_url = Column(String, nullable=True)
+    reply_to_id   = Column(Integer, ForeignKey("chat_messages.id"), nullable=True)
+    deleted_for   = Column(Text, nullable=True, default="[]")
+    created_at    = Column(DateTime, server_default=func.now(), index=True)
 
     __table_args__ = (
         Index("ix_chat_sender_receiver", "sender_id", "receiver_id"),
         Index("ix_chat_receiver_created", "receiver_id", "created_at"),
     )
 
-    sender   = relationship("User", foreign_keys=[sender_id],   back_populates="sent_messages")
-    receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_messages")
+    sender      = relationship("User", foreign_keys=[sender_id],   back_populates="sent_messages")
+    receiver    = relationship("User", foreign_keys=[receiver_id], back_populates="received_messages")
+    reply_to    = relationship("ChatMessage", remote_side=[id], backref="replies")
 
 
 class ActivityLog(Base):

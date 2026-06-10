@@ -116,8 +116,23 @@ def _get_chat_data(user_id, other_id):
                 )
             ).order_by(models.ChatMessage.created_at.asc()).all()
 
-        return [
-            {
+        result = []
+        for m in messages:
+            # Пропускаем удалённые для пользователя
+            deleted_for = json.loads(m.deleted_for) if m.deleted_for else []
+            if user_id in deleted_for:
+                continue
+            
+            reply_data = None
+            if m.reply_to_id:
+                reply_msg = db.query(models.ChatMessage).filter_by(id=m.reply_to_id).first()
+                if reply_msg:
+                    reply_data = {
+                        "text": reply_msg.text,
+                        "sender_name": reply_msg.sender.full_name or reply_msg.sender.username,
+                    }
+            
+            result.append({
                 "id": m.id,
                 "text": m.text,
                 "sender_id": m.sender_id,
@@ -127,9 +142,13 @@ def _get_chat_data(user_id, other_id):
                 "sender_initial": (m.sender.full_name or m.sender.username)[0].upper(),
                 "time": m.created_at.strftime("%H:%M"),
                 "is_me": m.sender_id == user_id,
-            }
-            for m in messages
-        ]
+                "attachment_url": m.attachment_url,
+                "reply_to_id": m.reply_to_id,
+                "reply_text": reply_data["text"] if reply_data else None,
+                "reply_sender_name": reply_data["sender_name"] if reply_data else None,
+                "deleted_for": deleted_for,
+            })
+        return result
     finally:
         db.close()
 

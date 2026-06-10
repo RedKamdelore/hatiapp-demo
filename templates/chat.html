@@ -15,18 +15,69 @@
   {% set u = item.user %}
   {% set last = item.last_msg %}
   {% set unread = item.unread %}
+
+  {% if item.is_lotos %}
+  <!-- ЛОТОС — при клике открывается общий чат со всеми лотосами -->
+  <a href="/chat/with/{{ u.id }}"
+     class="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 hover:shadow-md transition"
+     data-lotos="true"
+     data-lotos-id="{{ u.id }}">
+
+    <div style="position:relative;flex-shrink:0">
+      <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold bg-pink-100 text-pink-600">
+        🌸
+      </div>
+      {% if unread > 0 %}
+      <span class="dialog-badge"
+        style="position:absolute;top:-4px;right:-4px;
+               background:#ef4444;color:#fff;border-radius:50%;
+               min-width:18px;height:18px;font-size:10px;font-weight:700;
+               display:flex;align-items:center;justify-content:center;
+               border:2px solid #fff;padding:0 4px;">
+        {{ unread }}
+      </span>
+      {% endif %}
+    </div>
+
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-gray-800 text-sm">{{ u.full_name or u.username }} <span class="text-pink-400">🌸</span></span>
+        {% if last %}
+        <span class="text-xs text-gray-400 flex-shrink-0 dialog-time">{{ last.created_at.strftime('%H:%M') }}</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center justify-between mt-0.5">
+        {% if last %}
+        <p class="text-xs text-gray-400 truncate dialog-preview">
+          {% if last.sender_id == user.id %}
+            <span class="text-gray-300">Вы: </span>
+          {% else %}
+            <span class="text-pink-400">{{ last.sender.full_name or last.sender.username }} 🌸: </span>
+          {% endif %}
+          {{ last.text }}
+        </p>
+        {% else %}
+        <p class="text-xs text-gray-300">Напишите в поддержку</p>
+        {% endif %}
+        <span class="text-xs px-2 py-0.5 rounded-full ml-2 flex-shrink-0 bg-pink-100 text-pink-600">
+          lotos
+        </span>
+      </div>
+    </div>
+  </a>
+
+  {% else %}
+  <!-- ОБЫЧНЫЙ ДИАЛОГ -->
   <a href="/chat/with/{{ u.id }}"
      class="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 hover:shadow-md transition"
      data-dialog-id="{{ u.id }}">
 
-    <!-- Аватар + бейдж -->
     <div style="position:relative;flex-shrink:0">
       {% if u.avatar %}
         <img src="/static/avatars/{{ u.avatar }}" class="w-11 h-11 rounded-full object-cover"/>
       {% else %}
         <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold
-          {% if u.role == 'lotos' %}bg-pink-100 text-pink-600
-          {% elif u.role == 'admin' %}bg-purple-100 text-purple-600
+          {% if u.role == 'admin' %}bg-purple-100 text-purple-600
           {% else %}bg-indigo-100 text-indigo-600{% endif %}">
           {{ (u.full_name or u.username)[0].upper() }}
         </div>
@@ -45,9 +96,7 @@
 
     <div class="flex-1 min-w-0">
       <div class="flex items-center justify-between">
-        <span class="font-medium text-gray-800 text-sm">{{ u.full_name or u.username }}
-          {% if u.role == 'lotos' %}<span class="text-pink-400">🌸</span>{% endif %}
-        </span>
+        <span class="font-medium text-gray-800 text-sm">{{ u.full_name or u.username }}</span>
         {% if last %}
         <span class="text-xs text-gray-400 flex-shrink-0 dialog-time">{{ last.created_at.strftime('%H:%M') }}</span>
         {% endif %}
@@ -66,7 +115,6 @@
         <span class="text-xs px-2 py-0.5 rounded-full ml-2 flex-shrink-0
           {% if u.role == 'volunteer' %}bg-gray-100 text-gray-500
           {% elif u.role == 'leader' %}bg-blue-100 text-blue-600
-          {% elif u.role == 'lotos' %}bg-pink-100 text-pink-600
           {% elif u.role == 'admin' %}bg-purple-100 text-purple-600
           {% else %}bg-gray-100 text-gray-500{% endif %}">
           {{ u.role }}
@@ -74,6 +122,7 @@
       </div>
     </div>
   </a>
+  {% endif %}
   {% endfor %}
 </div>
 
@@ -85,29 +134,9 @@
 </div>
 {% endif %}
 
-<!-- FAB -->
-<button onclick="openNewChat()"
-  class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition hover:scale-110 z-50">
-  +
-</button>
+<!-- FAB добавляется через JS в body -->
 
-<!-- Модалка -->
-<div id="new-chat-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-end sm:items-center justify-center p-4">
-  <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col">
-    <div class="p-4 border-b border-gray-100 flex items-center justify-between">
-      <h2 class="text-lg font-bold text-gray-800">Новый чат</h2>
-      <button onclick="closeNewChat()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
-    </div>
-    <div class="p-4">
-      <input type="text" id="search-user" placeholder="Поиск по позывному..."
-        class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-        oninput="searchUsers(this.value)">
-    </div>
-    <div id="search-results" class="flex-1 overflow-y-auto px-4 pb-4">
-      <!-- Результаты поиска -->
-    </div>
-  </div>
-</div>
+<!-- Модалка перенесена в блок modals -->
 
 {% else %}
 <!-- ДИАЛОГ -->
@@ -141,15 +170,36 @@
   </div>
 </div>
 
-<form id="chat-form" class="flex gap-2">
+<!-- Reply preview -->
+<div id="reply-preview" class="hidden mb-2 p-2 bg-gray-50 rounded-xl text-xs flex items-center justify-between">
+  <div class="truncate">
+    <span class="text-gray-400">Ответ на:</span>
+    <span id="reply-text" class="text-gray-600 ml-1"></span>
+  </div>
+  <button onclick="cancelReply()" class="text-gray-400 hover:text-gray-600 ml-2">✕</button>
+</div>
+
+<form id="chat-form" class="flex gap-2" enctype="multipart/form-data" method="post" action="/chat/send">
   <input type="hidden" name="receiver_id" value="{{ target.id }}"/>
-  <input type="text" name="text" id="chat-input" required
+  <input type="hidden" name="reply_to_id" id="reply-to-id" value=""/>
+  
+  <label class="cursor-pointer bg-gray-100 hover:bg-gray-200 rounded-2xl px-3 py-3 text-sm transition flex items-center justify-center">
+    📎
+    <input type="file" name="file" id="chat-file" class="hidden" accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleFileSelect(this)"/>
+  </label>
+  
+  <input type="text" name="text" id="chat-input"
     placeholder="Написать сообщение..."
     autocomplete="off"
     class="flex-1 border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
   <button type="submit"
     class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-2xl text-sm transition">➤</button>
 </form>
+
+<div id="file-preview" class="hidden mt-2 text-xs text-gray-500 flex items-center gap-2">
+  <span id="file-name"></span>
+  <button onclick="clearFile()" class="text-red-400 hover:text-red-600">✕</button>
+</div>
 
 {% endif %}
 
@@ -162,6 +212,177 @@ const WITH_ID = {% if view == 'dialog' %}{{ target.id }}{% else %}null{% endif %
 let lastIds = [];
 let lastMsgId = 0;
 let allMessages = [];
+let replyingTo = null;
+let selectedFile = null;
+
+// ── Reply функции ─────────────────────────────────────────────────────────
+function setReply(msgId, text) {
+  replyingTo = msgId;
+  document.getElementById('reply-to-id').value = msgId;
+  document.getElementById('reply-text').textContent = text.substring(0, 50) + (text.length > 50 ? '...' : '');
+  document.getElementById('reply-preview').classList.remove('hidden');
+}
+
+function cancelReply() {
+  replyingTo = null;
+  document.getElementById('reply-to-id').value = '';
+  document.getElementById('reply-preview').classList.add('hidden');
+}
+
+// ── Файл функции ──────────────────────────────────────────────────────────
+function handleFileSelect(input) {
+  if (input.files && input.files[0]) {
+    selectedFile = input.files[0];
+    document.getElementById('file-name').textContent = selectedFile.name;
+    document.getElementById('file-preview').classList.remove('hidden');
+  }
+}
+
+function clearFile() {
+  selectedFile = null;
+  document.getElementById('chat-file').value = '';
+  document.getElementById('file-preview').classList.add('hidden');
+}
+
+// ── Контекстное меню ─────────────────────────────────────────────────────
+let contextMenu = null;
+let selectedMessageId = null;
+let selectedMessageText = null;
+let selectedMessageSender = null;
+
+function createContextMenu() {
+  if (contextMenu) return;
+  contextMenu = document.createElement('div');
+  contextMenu.id = 'chat-context-menu';
+  contextMenu.style.cssText = 'position:fixed;background:#1f1f1f;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.5);padding:8px 0;z-index:10000;min-width:200px;display:none;font-size:14px;color:#e0e0e0;border:1px solid #333;';
+  contextMenu.innerHTML = `
+    <div class="context-item" data-action="reply" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#e0e0e0;"
+         onmouseover="this.style.background='#333'" onmouseout="this.style.background='transparent'">↩️ Ответить</div>
+    <div class="context-item" data-action="copy" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#e0e0e0;"
+         onmouseover="this.style.background='#333'" onmouseout="this.style.background='transparent'">📋 Копировать</div>
+    <div class="context-item" data-action="forward" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#e0e0e0;"
+         onmouseover="this.style.background='#333'" onmouseout="this.style.background='transparent'">➡️ Переслать</div>
+    <div style="height:1px;background:#444;margin:4px 0;"></div>
+    <div class="context-item" data-action="delete-me" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#999;"
+         onmouseover="this.style.background='#333'" onmouseout="this.style.background='transparent'">🗑 Удалить для себя</div>
+    <div class="context-item" data-action="delete-all" style="padding:10px 16px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#ff4444;"
+         onmouseover="this.style.background='#333'" onmouseout="this.style.background='transparent'">🗑 Удалить для всех</div>
+  `;
+  document.body.appendChild(contextMenu);
+  
+  contextMenu.addEventListener('click', function(e) {
+    const item = e.target.closest('.context-item');
+    if (!item) return;
+    const action = item.dataset.action;
+    handleContextAction(action);
+    hideContextMenu();
+  });
+}
+
+function showContextMenu(x, y, msgId, text, senderId) {
+  if (!contextMenu) createContextMenu();
+  selectedMessageId = msgId;
+  selectedMessageText = text;
+  selectedMessageSender = senderId;
+  contextMenu.style.left = Math.min(x, window.innerWidth - 200) + 'px';
+  contextMenu.style.top = Math.min(y, window.innerHeight - 200) + 'px';
+  contextMenu.style.display = 'block';
+}
+
+function hideContextMenu() {
+  if (contextMenu) contextMenu.style.display = 'none';
+}
+
+function handleContextAction(action) {
+  if (!selectedMessageId) return;
+  
+  switch(action) {
+    case 'reply':
+      setReply(selectedMessageId, selectedMessageText || '');
+      document.getElementById('chat-input').focus();
+      break;
+    case 'copy':
+      navigator.clipboard.writeText(selectedMessageText || '').then(() => {
+        showToast('Текст скопирован');
+      });
+      break;
+    case 'forward':
+      openForwardModal(selectedMessageId, selectedMessageText);
+      break;
+    case 'delete-me':
+      fetch('/chat/delete-for-me/' + selectedMessageId, {method: 'POST'})
+        .then(() => {
+          showToast('Удалено для вас');
+          location.reload();
+        });
+      break;
+    case 'delete-all':
+      if (confirm('Удалить сообщение для всех?')) {
+        fetch('/chat/delete/' + selectedMessageId, {method: 'POST'})
+          .then(() => {
+            showToast('Удалено');
+            location.reload();
+          });
+      }
+      break;
+  }
+}
+
+function showToast(text) {
+  const toast = document.createElement('div');
+  toast.textContent = text;
+  toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;z-index:10001;';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2000);
+}
+
+// ── Модалка пересылки ────────────────────────────────────────────────────
+function openForwardModal(msgId, text) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;width:90%;max-width:400px;max-height:70vh;display:flex;flex-direction:column;">
+      <div style="padding:16px;border-bottom:1px solid #e5e7eb;">
+        <h3 style="margin:0;font-size:16px;font-weight:bold;">Переслать сообщение</h3>
+        <p style="margin:4px 0 0;font-size:12px;color:#6b7280;">${text.substring(0, 60)}${text.length > 60 ? '...' : ''}</p>
+      </div>
+      <div id="forward-list" style="flex:1;overflow-y:auto;padding:8px;">Загрузка...</div>
+      <div style="padding:12px;border-top:1px solid #e5e7eb;text-align:right;">
+        <button onclick="this.closest('.fixed').remove()" style="padding:8px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Отмена</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  
+  // Загружаем диалоги
+  fetch('/api/users/search?q=')
+    .then(r => r.json())
+    .then(users => {
+      const list = modal.querySelector('#forward-list');
+      list.innerHTML = '';
+      users.forEach(u => {
+        const btn = document.createElement('button');
+        btn.style.cssText = 'width:100%;text-align:left;padding:10px;border-radius:8px;border:none;background:transparent;cursor:pointer;display:flex;align-items:center;gap:10px;';
+        btn.innerHTML = `
+          <div style="width:36px;height:36px;border-radius:50%;background:#e0e7ff;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;color:#4338ca;">${(u.full_name || u.username)[0].toUpperCase()}</div>
+          <div><div style="font-size:13px;font-weight:500;">${u.full_name || u.username}</div><div style="font-size:11px;color:#6b7280;">${u.role}</div></div>
+        `;
+        btn.onmouseover = () => btn.style.background = '#f3f4f6';
+        btn.onmouseout = () => btn.style.background = 'transparent';
+        btn.onclick = () => {
+          const form = new FormData();
+          form.append('message_id', msgId);
+          form.append('receiver_id', u.id);
+          fetch('/chat/forward', {method: 'POST', body: form})
+            .then(() => {
+              showToast('Переслано!');
+              modal.remove();
+            });
+        };
+        list.appendChild(btn);
+      });
+    });
+}
 
 function playNotificationSound() {
   try {
@@ -186,7 +407,7 @@ function renderMessages() {
   if (!box) return;
   
   const messages = allMessages;
-  const ids = messages.map(m => m.id + m.text + m.sender_id).join(',');
+  const ids = messages.map(m => m.id + m.text + m.sender_id + (m.attachment_url || '')).join(',');
   if (ids === lastIds) return;
   lastIds = ids;
 
@@ -197,12 +418,18 @@ function renderMessages() {
     : '';
 
   messages.forEach(function(m) {
+    // Пропускаем удалённые для меня
+    if (m.deleted_for && Array.isArray(m.deleted_for) && m.deleted_for.includes(ME)) {
+      return;
+    }
+    
     const isMe = m.sender_id === ME;
     const isLotos = m.sender_role === 'lotos';
     const isAdmin = m.sender_role === 'admin';
 
     const wrap = document.createElement('div');
     wrap.style.cssText = 'display:flex;align-items:flex-end;gap:8px;' + (isMe ? 'justify-content:flex-end;' : '');
+    wrap.dataset.msgId = m.id;
 
     if (!isMe) {
       const av = document.createElement('div');
@@ -233,7 +460,7 @@ function renderMessages() {
     row.style.cssText = 'display:flex;align-items:flex-end;gap:4px;' + (isMe ? 'flex-direction:row-reverse;' : '');
 
     const bubble = document.createElement('div');
-    let bubbleStyle = 'padding:8px 12px;border-radius:18px;font-size:0.875rem;line-height:1.5;';
+    let bubbleStyle = 'padding:8px 12px;border-radius:18px;font-size:0.875rem;line-height:1.5;cursor:pointer;user-select:none;-webkit-user-select:none;';
     if (isMe) {
       bubbleStyle += 'background:#4f46e5;color:#fff;border-bottom-right-radius:4px;';
     } else if (isLotos) {
@@ -244,12 +471,79 @@ function renderMessages() {
       bubbleStyle += 'background:#f3f4f6;color:#1f2937;border-bottom-left-radius:4px;';
     }
     bubble.style.cssText = bubbleStyle;
-    bubble.textContent = m.text;
+    
+    // Reply блок
+    if (m.reply_to_id && m.reply_text) {
+      const replyBlock = document.createElement('div');
+      replyBlock.style.cssText = 'font-size:11px;opacity:0.7;margin-bottom:4px;padding-left:8px;border-left:2px solid ' + (isMe ? 'rgba(255,255,255,0.5)' : '#9ca3af') + ';max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      replyBlock.textContent = m.reply_sender_name + ': ' + m.reply_text;
+      bubble.appendChild(replyBlock);
+    }
+    
+    // Текст сообщения
+    if (m.text && !m.text.startsWith('📎 ')) {
+      const textDiv = document.createElement('div');
+      textDiv.textContent = m.text;
+      bubble.appendChild(textDiv);
+    }
+    
+    // Вложение
+    if (m.attachment_url) {
+      if (m.attachment_url.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        const img = document.createElement('img');
+        img.src = m.attachment_url;
+        img.style.cssText = 'max-width:200px;max-height:200px;border-radius:8px;margin-top:4px;cursor:pointer;';
+        img.onclick = function(e) {
+          e.stopPropagation();
+          window.open(m.attachment_url, '_blank');
+        };
+        bubble.appendChild(img);
+      } else {
+        const fileLink = document.createElement('a');
+        fileLink.href = m.attachment_url;
+        fileLink.download = '';
+        fileLink.style.cssText = 'display:flex;align-items:center;gap:6px;color:' + (isMe ? '#fff' : '#4f46e5') + ';text-decoration:none;margin-top:4px;font-size:12px;';
+        fileLink.innerHTML = '📎 ' + (m.text ? m.text.replace('📎 ', '') : 'Файл');
+        bubble.appendChild(fileLink);
+      }
+    }
 
     const time = document.createElement('span');
-    time.style.cssText = 'font-size:10px;opacity:0.5;margin-left:4px';
+    time.style.cssText = 'font-size:10px;opacity:0.5;margin-left:4px;display:block;text-align:' + (isMe ? 'left' : 'right') + ';margin-top:2px;';
     time.textContent = m.time;
     bubble.appendChild(time);
+
+    // Обработчик удержания для контекстного меню
+    let pressTimer;
+    let isLongPress = false;
+    
+    function startPress(e) {
+      isLongPress = false;
+      pressTimer = setTimeout(function() {
+        isLongPress = true;
+        const touch = e.touches ? e.touches[0] : e;
+        showContextMenu(touch.clientX, touch.clientY, m.id, m.text, m.sender_id);
+      }, 600);
+    }
+    
+    function cancelPress(e) {
+      clearTimeout(pressTimer);
+      if (!isLongPress) {
+        // Обычный клик — ничего не делаем
+      }
+    }
+    
+    bubble.addEventListener('mousedown', startPress);
+    bubble.addEventListener('mouseup', cancelPress);
+    bubble.addEventListener('mouseleave', function() { clearTimeout(pressTimer); });
+    bubble.addEventListener('touchstart', startPress, {passive: true});
+    bubble.addEventListener('touchend', cancelPress);
+    
+    // ПК — правый клик
+    bubble.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, m.id, m.text, m.sender_id);
+    });
 
     row.appendChild(bubble);
     col.appendChild(row);
@@ -262,10 +556,25 @@ function renderMessages() {
   }
 }
 
+// ── Создаём FAB кнопку динамически (чтобы быть вне всех контейнеров) ────────
+(function() {
+  if (document.getElementById('chat-fab')) return;
+  const fab = document.createElement('button');
+  fab.id = 'chat-fab';
+  fab.textContent = '+';
+  fab.style.cssText = 'position:fixed;bottom:24px;right:24px;width:56px;height:56px;background:#4f46e5;color:#fff;border-radius:50%;border:none;box-shadow:0 4px 12px rgba(0,0,0,0.3);font-size:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:9999;transition:transform 0.2s;';
+  fab.onmouseover = function() { this.style.transform = 'scale(1.1)'; };
+  fab.onmouseout = function() { this.style.transform = 'scale(1)'; };
+  fab.onclick = openNewChat;
+  document.body.appendChild(fab);
+})();
+
 // ── Модалка нового чата ────────────────────────────────────────────────────
 function openNewChat() {
   document.getElementById('new-chat-modal').classList.remove('hidden');
   document.getElementById('search-user').focus();
+  // Сразу загружаем всех
+  searchUsers('');
 }
 
 function closeNewChat() {
@@ -277,19 +586,26 @@ function searchUsers(query) {
   if (searchTimeout) clearTimeout(searchTimeout);
   const resultsEl = document.getElementById('search-results');
   
-  if (!query || query.length < 2) {
-    resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Введите минимум 2 символа</p>';
+  if (query && query.length < 1) {
+    resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Введите минимум 1 символ</p>';
     return;
   }
   
-  resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Поиск...</p>';
+  // Если запрос пустой — загружаем всех
+  if (!query || query.trim().length === 0) {
+    resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Загрузка...</p>';
+    query = '';
+  } else {
+    resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Поиск...</p>';
+  }
   
   searchTimeout = setTimeout(function() {
     fetch('/api/users/search?q=' + encodeURIComponent(query))
       .then(function(r) { return r.json(); })
       .then(function(users) {
         if (users.length === 0) {
-          resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Ничего не найдено</p>';
+          const msg = query ? 'Ничего не найдено' : 'Нет доступных пользователей';
+          resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">' + msg + '</p>';
           return;
         }
         resultsEl.innerHTML = '';
@@ -388,11 +704,15 @@ if (document.getElementById('new-chat-modal')) {
 
   function sendMessage(text, receiverId) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
+      const payload = {
         action: 'send',
         text: text,
         receiver_id: parseInt(receiverId),
-      }));
+      };
+      if (replyingTo) {
+        payload.reply_to_id = replyingTo;
+      }
+      ws.send(JSON.stringify(payload));
     }
   }
 
@@ -402,11 +722,31 @@ if (document.getElementById('new-chat-modal')) {
     e.preventDefault();
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
-    if (!text) return;
-
+    const fileInput = document.getElementById('chat-file');
     const receiverId = this.querySelector('[name=receiver_id]').value;
-    sendMessage(text, receiverId);
-    input.value = '';
+    const replyToId = document.getElementById('reply-to-id').value;
+
+    if (fileInput.files && fileInput.files[0]) {
+      // Отправка с файлом
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      formData.append('receiver_id', receiverId);
+      if (replyToId) formData.append('reply_to_id', replyToId);
+
+      fetch('/chat/upload', {
+        method: 'POST',
+        body: formData,
+      }).then(() => {
+        clearFile();
+        cancelReply();
+        location.reload();
+      });
+    } else if (text) {
+      // Отправка текста через WebSocket
+      sendMessage(text, receiverId);
+      input.value = '';
+      cancelReply();
+    }
   });
 
   // Загружаем начальные сообщения
@@ -421,4 +761,24 @@ if (document.getElementById('new-chat-modal')) {
   {% endif %}
 })();
 </script>
+{% endblock %}
+
+{% block modals %}
+<!-- Модалка нового чата -->
+<div id="new-chat-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-end sm:items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+    <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="text-lg font-bold text-gray-800">Новый чат</h2>
+      <button onclick="closeNewChat()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <div class="p-4">
+      <input type="text" id="search-user" placeholder="Поиск по позывному..."
+        class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        oninput="searchUsers(this.value)">
+    </div>
+    <div id="search-results" class="flex-1 overflow-y-auto px-4 pb-4">
+      <!-- Результаты поиска -->
+    </div>
+  </div>
+</div>
 {% endblock %}

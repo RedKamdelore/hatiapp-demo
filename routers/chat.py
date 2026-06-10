@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Request, Depends, Form, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Request, Depends, Form, WebSocket, WebSocketDisconnect, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 from datetime import datetime, timezone
+import os
+import json
+import shutil
+from pathlib import Path
 
 from database import get_db
 from services.auth import get_current_user
@@ -37,7 +41,7 @@ def mark_read(user_id: int, other_id: int, db: Session):
     db.commit()
 
 
-def _get_dialogs(user_id: int, db: Session):
+def _get_dialogs(user_id: int, user_role: str, db: Session):
     """Возвращает все диалоги пользователя, отсортированные по времени."""
     # Все сообщения где участвует пользователь
     messages = db.query(models.ChatMessage).filter(
@@ -73,6 +77,7 @@ def _get_dialogs(user_id: int, db: Session):
     # Преобразуем в список
     lotos_ids = get_all_lotos_ids(db)
     result = []
+
     for other_id, info in dialogs.items():
         u = db.query(models.User).filter_by(id=other_id).first()
         if not u:
@@ -84,11 +89,30 @@ def _get_dialogs(user_id: int, db: Session):
             "is_lotos": u.role == ROLE_LOTOS,
         })
 
-    # Сортируем: лотосы первые, затем по времени
-    result.sort(key=lambda x: (
-        0 if x["is_lotos"] else 1,
-        x["last_msg"].created_at if x["last_msg"] else datetime.min
-    ), reverse=True)
+    # Добавляем лотосов, с которыми ещё нет переписки
+    existing_ids = {d["user"].id for d in result}
+    if user_role != ROLE_LOTOS:
+        for lotos in db.query(models.User).filter(
+            models.User.id.in_(list(lotos_ids)),
+            models.User.id != user_id,
+        ).all():
+            if lotos.id not in existing_ids:
+                result.append({
+                    "user": lotos,
+                    "last_msg": None,
+                    "unread": 0,
+                    "is_lotos": True,
+                })
+
+    # Сортируем: лотосы первые, затем по времени (новые сверху)
+    def sort_key(x):
+        # Лотосы первые (0), остальные вторые (1)
+        is_l = 0 if x["is_lotos"] else 1
+        # Время: новые сверху (отрицательный timestamp)
+        t = x["last_msg"].created_at.timestamp() if x["last_msg"] else 0
+        return (is_l, -t)
+
+    result.sort(key=sort_key)
 
     return result
 
@@ -96,13 +120,17 @@ def _get_dialogs(user_id: int, db: Session):
 @router.get("/chat", response_class=HTMLResponse)
 def chat_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
-    dialogs = _get_dialogs(user.id, db)
+    dialogs = _get_dialogs(user.id, user.role, db)
+
+    # Находим первого активного лотоса для ссылки "Поддержка"
+    lotos = db.query(models.User).filter_by(role=ROLE_LOTOS, is_active=True).first()
 
     return templates.TemplateResponse("chat.html", {
         "request": request,
         "user": user,
         "dialogs": dialogs,
         "view": "list",
+        "first_lotos": lotos if user.role != ROLE_LOTOS else None,
     })
 
 
@@ -146,24 +174,32 @@ def chat_with(target_id: int, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/api/users/search")
 def search_users(
-    q: str = Query("", min_length=1),
+    q: str = Query(""),
     request: Request = None,
     db: Session = Depends(get_db),
 ):
-    """Поиск пользователей для нового чата. Исключаем себя, лотосов, неактивных."""
+    """Поиск пользователей для нового чата. При пустом q — все. Исключаем себя, лотосов, неактивных."""
     user = get_current_user(request, db)
     lotos_ids = get_all_lotos_ids(db)
 
-    # Ищем по username и full_name
+    # Базовый фильтр
     query = db.query(models.User).filter(
         models.User.is_active == True,
         models.User.id != user.id,
         ~models.User.id.in_(list(lotos_ids)),
-        or_(
-            models.User.username.ilike(f"%{q}%"),
-            models.User.full_name.ilike(f"%{q}%"),
+    )
+
+    # Если есть поисковый запрос — фильтруем
+    if q and len(q.strip()) >= 1:
+        sq = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                models.User.username.ilike(sq),
+                models.User.full_name.ilike(sq),
+            )
         )
-    ).limit(20).all()
+
+    users = query.order_by(models.User.full_name, models.User.username).limit(50).all()
 
     return JSONResponse([
         {
@@ -173,37 +209,121 @@ def search_users(
             "role": u.role,
             "avatar": u.avatar,
         }
-        for u in query
+        for u in users
     ])
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+UPLOAD_DIR = BASE_DIR / "static" / "uploads" / "chat"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/chat/send")
 def send_message(
     request: Request,
-    text: str = Form(...),
+    text: str = Form(""),
     receiver_id: int = Form(...),
+    reply_to_id: int = Form(None),
     db: Session = Depends(get_db),
 ):
     user = get_current_user(request, db)
     text = text.strip()
-    if text:
+    if text or request.form().get("has_attachment"):
         db.add(models.ChatMessage(
             sender_id=user.id,
             receiver_id=receiver_id,
-            text=text,
+            text=text or "📎 Файл",
+            reply_to_id=reply_to_id,
         ))
         db.commit()
     return RedirectResponse(f"/chat/with/{receiver_id}", status_code=302)
 
 
+@router.post("/chat/upload")
+async def upload_chat_file(
+    request: Request,
+    file: UploadFile = File(...),
+    receiver_id: int = Form(...),
+    reply_to_id: int = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Загружает файл и отправляет сообщение с вложением."""
+    user = get_current_user(request, db)
+    
+    # Генерируем уникальное имя файла
+    ext = Path(file.filename).suffix
+    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user.id}{ext}"
+    filepath = UPLOAD_DIR / filename
+    
+    with filepath.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    # Сохраняем сообщение с вложением
+    db.add(models.ChatMessage(
+        sender_id=user.id,
+        receiver_id=receiver_id,
+        text=f"📎 {file.filename}",
+        attachment_url=f"/static/uploads/chat/{filename}",
+        reply_to_id=reply_to_id,
+    ))
+    db.commit()
+    
+    return RedirectResponse(f"/chat/with/{receiver_id}", status_code=302)
+
+
 @router.post("/chat/delete/{message_id}")
 def delete_message(message_id: int, request: Request, db: Session = Depends(get_db)):
+    """Удалить сообщение для всех (только отправитель или админ)."""
     user = get_current_user(request, db)
     msg = db.query(models.ChatMessage).filter_by(id=message_id).first()
     if msg and (msg.sender_id == user.id or user.role == ROLE_ADMIN):
+        # Удаляем файл если есть
+        if msg.attachment_url:
+            try:
+                (Path(".") / msg.attachment_url.lstrip("/")).unlink()
+            except:
+                pass
         db.delete(msg)
         db.commit()
     return RedirectResponse("/chat", status_code=302)
+
+
+@router.post("/chat/delete-for-me/{message_id}")
+def delete_for_me(message_id: int, request: Request, db: Session = Depends(get_db)):
+    """Удалить сообщение только для текущего пользователя."""
+    user = get_current_user(request, db)
+    msg = db.query(models.ChatMessage).filter_by(id=message_id).first()
+    if msg:
+        deleted_list = json.loads(msg.deleted_for or "[]")
+        if user.id not in deleted_list:
+            deleted_list.append(user.id)
+            msg.deleted_for = json.dumps(deleted_list)
+            db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/chat/forward")
+def forward_message(
+    request: Request,
+    message_id: int = Form(...),
+    receiver_id: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Переслать сообщение другому пользователю."""
+    user = get_current_user(request, db)
+    original = db.query(models.ChatMessage).filter_by(id=message_id).first()
+    if not original:
+        return RedirectResponse("/chat", status_code=302)
+    
+    db.add(models.ChatMessage(
+        sender_id=user.id,
+        receiver_id=receiver_id,
+        text=f"➡️ Переслано: {original.text}",
+        attachment_url=original.attachment_url,
+    ))
+    db.commit()
+    
+    return RedirectResponse(f"/chat/with/{receiver_id}", status_code=302)
 
 
 @router.post("/chat/read/{other_id}")
@@ -249,14 +369,16 @@ async def websocket_chat(websocket: WebSocket):
                 if action == "send":
                     text = msg.get("text", "").strip()
                     receiver_id = msg.get("receiver_id")
-                    if not text or not receiver_id:
+                    reply_to_id = msg.get("reply_to_id")
+                    if (not text and not msg.get("attachment_url")) or not receiver_id:
                         continue
 
                     # Сохраняем в БД
                     db_msg = models.ChatMessage(
                         sender_id=user_id,
                         receiver_id=receiver_id,
-                        text=text,
+                        text=text or "📎 Файл",
+                        reply_to_id=reply_to_id,
                     )
                     db.add(db_msg)
                     db.commit()
@@ -264,6 +386,16 @@ async def websocket_chat(websocket: WebSocket):
 
                     # Получаем данные получателя
                     receiver = db.query(models.User).filter_by(id=receiver_id).first()
+                    
+                    # Reply данные
+                    reply_data = None
+                    if reply_to_id:
+                        reply_msg = db.query(models.ChatMessage).filter_by(id=reply_to_id).first()
+                        if reply_msg:
+                            reply_data = {
+                                "text": reply_msg.text,
+                                "sender_name": reply_msg.sender.full_name or reply_msg.sender.username,
+                            }
 
                     # Формируем payload
                     payload = {
@@ -276,7 +408,11 @@ async def websocket_chat(websocket: WebSocket):
                         "receiver_id": receiver_id,
                         "receiver_name": receiver.full_name or receiver.username if receiver else None,
                         "receiver_role": receiver.role if receiver else None,
-                        "text": text,
+                        "text": text or "📎 Файл",
+                        "attachment_url": msg.get("attachment_url"),
+                        "reply_to_id": reply_to_id,
+                        "reply_text": reply_data["text"] if reply_data else None,
+                        "reply_sender_name": reply_data["sender_name"] if reply_data else None,
                         "created_at": db_msg.created_at.isoformat(),
                     }
 

@@ -224,6 +224,9 @@
     {% block content %}{% endblock %}
   </main>
 
+  <!-- Модалки (вне SPA-контейнера) -->
+  {% block modals %}{% endblock %}
+
   <!-- Нижняя навигация -->
   {% if user is defined and user %}
   {% set role = user.role %}
