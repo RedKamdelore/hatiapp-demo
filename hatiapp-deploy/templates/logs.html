@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Логи{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h1 class="text-xl font-bold text-gray-800">Логи и управление</h1>
+  <p class="text-xs text-gray-400 mt-0.5">Статус записи по дням и история действий</p>
+</div>
+
+{% set msg = request.query_params.get('msg') %}
+{% set status_q = request.query_params.get('status') %}
+{% if msg %}
+<div class="rounded-xl px-4 py-3 text-sm mb-4 border
+  {% if status_q == 'ok' %}bg-green-50 border-green-200 text-green-700
+  {% else %}bg-red-50 border-red-200 text-red-700{% endif %}">
+  {% if status_q == 'ok' %}✅{% else %}⚠️{% endif %} {{ msg }}
+</div>
+{% endif %}
+
+<!-- Дни расписания -->
+<h2 class="text-base font-semibold text-gray-700 mb-3">Статус по дням</h2>
+{% if days %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+  {% for day in days %}
+  <a href="/logs/day/{{ day.date.isoformat() }}"
+     class="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between hover:shadow-md transition group">
+    <div>
+      <div class="font-semibold text-gray-800 group-hover:text-indigo-600 transition">
+        {{ day.date.strftime('%d.%m.%Y') }}
+        <span class="text-xs text-gray-400 font-normal ml-1">
+          ({{ ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'][day.date.weekday()] }})
+        </span>
+      </div>
+      <div class="text-xs text-gray-400 mt-0.5">
+        Записалось {{ day.total - day.not_booked_count }} из {{ day.total }} волонтёров
+      </div>
+      <div class="text-xs text-gray-500 mt-1">
+        Слоты: {{ day.total_booked }}/{{ day.total_capacity }} · Нужно: {{ day.needed_people }} чел.
+      </div>
+      <div class="text-xs mt-1 {% if day.coverage_ok %}text-green-600{% else %}text-red-600{% endif %}">
+        В лагере: {{ day.available_people }} чел.
+        {% if day.shortage_people > 0 %}
+          · Не хватает: <strong>{{ day.shortage_people }} чел.</strong>
+        {% else %}
+          · ✓ Хватает людей
+        {% endif %}
+      </div>
+    </div>
+    <div class="text-right flex-shrink-0 space-y-1">
+      {% if day.all_ok %}
+        <span class="text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-full font-medium">✓ Все записаны</span>
+      {% else %}
+        <span class="text-xs bg-red-100 text-red-600 px-3 py-1.5 rounded-full font-medium">
+          {{ day.not_booked_count }} не добрали смены
+        </span>
+      {% endif %}
+      <br>
+      {% if day.coverage_ok %}
+        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-full font-medium">✓ Людей хватает</span>
+      {% else %}
+        <span class="text-xs bg-orange-100 text-orange-600 px-3 py-1.5 rounded-full font-medium">
+          -{{ day.shortage_people }} чел.
+        </span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-400 mb-6">
+  <div class="text-3xl mb-2">📅</div>
+  <p class="text-sm">Расписание не загружено</p>
+</div>
+{% endif %}
+
+<!-- Лог действий -->
+<h2 class="text-base font-semibold text-gray-700 mb-3">История действий</h2>
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+  {% if logs %}
+  <div class="hidden md:block overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-gray-400 text-xs uppercase">
+        <tr>
+          <th class="text-left px-4 py-3">Время</th>
+          <th class="text-left px-4 py-3">Кто</th>
+          <th class="text-center px-4 py-3">Действие</th>
+          <th class="text-left px-4 py-3">Волонтёр</th>
+          <th class="text-left px-4 py-3">Слот</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for log in logs %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+            {{ log.created_at.strftime('%d.%m %H:%M') }}
+          </td>
+          <td class="px-4 py-3 text-gray-700 text-sm">
+            {{ log.actor.full_name or log.actor.username if log.actor else '—' }}
+          </td>
+          <td class="px-4 py-3 text-center">
+            {% if log.action == 'booked' %}
+              <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">записался</span>
+            {% elif log.action == 'cancelled' %}
+              <span class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">снялся</span>
+            {% elif log.action == 'admin_booked' %}
+              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">записал вручную</span>
+            {% elif log.action == 'admin_cancelled' %}
+              <span class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">снял вручную</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-gray-600 text-sm">
+            {{ log.target.full_name or log.target.username if log.target else '—' }}
+          </td>
+          <td class="px-4 py-3 text-gray-500 text-xs">
+            {% if log.slot %}
+              {{ log.slot.direction.name }} · {{ log.slot.date.strftime('%d.%m') }} {{ log.slot.time.strftime('%H:%M') }}
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="md:hidden flex flex-col divide-y divide-gray-100">
+    {% for log in logs %}
+    <div class="p-4">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-xs text-gray-400">{{ log.created_at.strftime('%d.%m %H:%M') }}</span>
+        {% if log.action == 'booked' %}
+          <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">записался</span>
+        {% elif log.action == 'cancelled' %}
+          <span class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">снялся</span>
+        {% elif log.action == 'admin_booked' %}
+          <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">записал вручную</span>
+        {% elif log.action == 'admin_cancelled' %}
+          <span class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">снял вручную</span>
+        {% endif %}
+      </div>
+      <p class="text-sm font-medium text-gray-800">
+        {{ log.actor.full_name or log.actor.username if log.actor else '—' }}
+        {% if log.target %}<span class="text-gray-400 font-normal">→ {{ log.target.full_name or log.target.username }}</span>{% endif %}
+      </p>
+      {% if log.slot %}
+      <p class="text-xs text-gray-400 mt-0.5">
+        {{ log.slot.direction.name }} · {{ log.slot.date.strftime('%d.%m') }} {{ log.slot.time.strftime('%H:%M') }}
+      </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <!-- Пагинация -->
+  {% if total_pages > 1 %}
+  <div class="flex items-center justify-center gap-2 py-4 border-t border-gray-100">
+    {% if page > 1 %}
+    <a href="/logs?page={{ page - 1 }}" class="px-3 py-1.5 text-sm rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100">← Назад</a>
+    {% endif %}
+    <span class="text-sm text-gray-500">{{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="/logs?page={{ page + 1 }}" class="px-3 py-1.5 text-sm rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100">Вперёд →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="text-center text-gray-400 py-12">
+    <div class="text-3xl mb-2">📋</div>
+    <p class="text-sm">Действий пока нет</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

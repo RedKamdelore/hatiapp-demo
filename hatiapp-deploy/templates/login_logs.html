@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Логи входов{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <div class="flex items-center gap-3">
+    <a href="/admin" class="text-gray-400 hover:text-gray-600">← Назад</a>
+    <h1 class="text-xl font-bold text-gray-800">Логи входов</h1>
+  </div>
+  <p class="text-xs text-gray-400 mt-0.5">Всего записей: {{ total }}</p>
+</div>
+
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-gray-50 border-b border-gray-200">
+          <th class="text-left px-4 py-3 text-gray-400 font-medium">Время</th>
+          <th class="text-left px-4 py-3 text-gray-400 font-medium">Пользователь</th>
+          <th class="text-left px-4 py-3 text-gray-400 font-medium">IP</th>
+          <th class="text-left px-4 py-3 text-gray-400 font-medium">Устройство</th>
+          <th class="text-left px-4 py-3 text-gray-400 font-medium">User-Agent</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for log in logs %}
+        <tr class="hover:bg-gray-50 transition">
+          <td class="px-4 py-3 text-gray-600 whitespace-nowrap">
+            {{ log.created_at.strftime('%d.%m.%Y %H:%M') }}
+          </td>
+          <td class="px-4 py-3">
+            <span class="font-medium text-gray-800">{{ log.user.full_name or log.user.username }}</span>
+            <span class="text-xs text-gray-400 ml-1">({{ log.user.username }})</span>
+          </td>
+          <td class="px-4 py-3 text-gray-600 font-mono text-xs">{{ log.ip_address or '—' }}</td>
+          <td class="px-4 py-3">
+            {% if log.device_type == 'mobile' %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-600">📱 Мобильный</span>
+            {% elif log.device_type == 'tablet' %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-purple-50 text-purple-600">📟 Планшет</span>
+            {% elif log.device_type == 'desktop' %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">💻 ПК</span>
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">❓ Неизвестно</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-gray-400 text-xs max-w-xs truncate" title="{{ log.user_agent or '' }}">
+            {{ log.user_agent or '—' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if total_pages > 1 %}
+  <div class="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+    <a href="/admin/login-logs?page={{ page - 1 }}"
+       class="text-sm text-gray-500 hover:text-indigo-600 {% if page <= 1 %}opacity-30 pointer-events-none{% endif %}">← Назад</a>
+    <span class="text-sm text-gray-400">{{ page }} / {{ total_pages }}</span>
+    <a href="/admin/login-logs?page={{ page + 1 }}"
+       class="text-sm text-gray-500 hover:text-indigo-600 {% if page >= total_pages %}opacity-30 pointer-events-none{% endif %}">Вперёд →</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

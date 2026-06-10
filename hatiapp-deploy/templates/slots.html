@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}{{ direction.name }} — {{ slot_date.strftime('%d.%m.%Y') }}{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <a href="/schedule" class="text-gray-400 hover:text-gray-600 transition">← Назад</a>
+    <div>
+      <h1 class="text-2xl font-bold text-gray-800">{{ direction.name }}</h1>
+      <p class="text-gray-400 text-sm">{{ slot_date.strftime('%d %B %Y') }}</p>
+    </div>
+  </div>
+  {% if show_status %}
+  <div class="rounded-xl px-4 py-2 border text-right
+    {% if day_full %}bg-green-50 border-green-200{% else %}bg-yellow-50 border-yellow-200{% endif %}">
+    <div class="text-lg font-bold {% if day_full %}text-green-600{% else %}text-yellow-600{% endif %}">
+      {% if day_full %}✓{% endif %} {{ day_count }} / {{ required_per_day }}
+    </div>
+    <div class="text-xs {% if day_full %}text-green-500{% else %}text-yellow-500{% endif %}">смен в этот день</div>
+  </div>
+  {% endif %}
+</div>
+
+{% if is_blocked %}
+<div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">
+  🔒 Этот день заблокирован для записи.
+</div>
+{% elif request.query_params.get('error') == 'limit' %}
+<div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">
+  ⚠️ На этот день вы уже записаны на {{ required_per_day }} смены.
+</div>
+{% elif request.query_params.get('error') %}
+<div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">
+  ⚠️ {{ request.query_params.get('error') }}
+</div>
+{% endif %}
+
+{% if show_status and day_full %}
+<div class="bg-blue-50 border border-blue-200 text-blue-700 rounded-xl px-4 py-3 text-sm mb-4">
+  ✅ На {{ slot_date.strftime('%d.%m') }} у вас уже {{ required_per_day }} смены.
+  Чтобы изменить — отмените одну из <a href="/me" class="underline">своих записей</a>.
+</div>
+{% endif %}
+
+{% if slot_data %}
+<div class="grid gap-3">
+  {% for item in slot_data %}
+  {% set slot = item.slot %}
+  {% set stats = item.stats %}
+
+  <div class="bg-white rounded-xl border border-gray-200 p-4" id="slot-card-{{ slot.id }}">
+    <div class="flex items-center gap-4 mb-3">
+      <div class="text-center min-w-[60px]">
+        <span class="text-xl font-bold text-indigo-600">{{ slot.time.strftime('%H:%M') }}</span>
+      </div>
+      <div class="flex-1">
+        <div class="flex justify-between text-xs text-gray-500 mb-1">
+          <span>Занято: <span class="booked-count">{{ stats.booked }}</span></span>
+          <span>Свободно: <span class="free-count">{{ stats.free }}</span></span>
+        </div>
+        <div class="w-full bg-gray-100 rounded-full h-2">
+          <div class="progress-bar h-2 rounded-full transition-all
+            {% if stats.percent >= 100 %}bg-red-400{% elif stats.percent >= 70 %}bg-yellow-400{% else %}bg-green-400{% endif %}"
+            style="width:{{ stats.percent }}%" data-slot="{{ slot.id }}"></div>
+        </div>
+      </div>
+      <div class="min-w-[110px] text-right">
+        {% if item.is_booked %}
+          {% if show_status %}
+          <form method="post" action="/cancel/{{ item.booking_id }}">
+            <button type="submit" class="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition">
+              Отменить
+            </button>
+          </form>
+          {% else %}
+          <span class="text-xs text-indigo-500">✓ Вы записаны</span>
+          {% endif %}
+        {% elif is_blocked %}
+          <span class="text-xs text-red-400">🔒 Заблокировано</span>
+        {% elif not show_status %}
+          <span class="text-xs text-gray-300">Только просмотр</span>
+        {% elif show_status and day_full %}
+          <span class="text-xs text-gray-300">Лимит на день</span>
+        {% elif stats.free > 0 %}
+          <form method="post" action="/book/{{ slot.id }}">
+            <button type="submit" class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition">
+              Записаться
+            </button>
+          </form>
+        {% else %}
+          <span class="text-xs text-gray-400">Мест нет</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Список волонтёров — обновляется динамически -->
+    <div class="volunteers-list-{{ slot.id }}" data-can-manage="{{ 'true' if not show_status else 'false' }}">
+      {% if slot.bookings %}
+      <div class="border-t border-gray-100 pt-3">
+        <p class="text-xs text-gray-400 mb-3">Записались:</p>
+        <div class="flex flex-wrap gap-4">
+          {% for booking in slot.bookings %}
+          {% set u = booking.user %}
+          {% set can_manage = not show_status %}
+          <div class="flex flex-col items-center gap-1.5 w-16 relative">
+            <button type="button"
+              onclick="showVolMenu(event, {{ booking.id }}, {{ u.id }}, '{{ (u.full_name or u.username) | replace("'", "\\'") }}', '{{ u.username }}', {{ 'true' if can_manage else 'false' }})"
+              class="focus:outline-none cursor-pointer">
+              {% if u.avatar %}
+                <img src="/static/avatars/{{ u.avatar }}"
+                     class="w-14 h-14 rounded-full object-cover ring-2 ring-indigo-100 hover:ring-indigo-400 transition"/>
+              {% else %}
+                <div class="w-14 h-14 rounded-full bg-indigo-100 flex items-center justify-center text-xl font-bold text-indigo-500 ring-2 ring-indigo-100 hover:ring-indigo-400 transition">
+                  {{ (u.full_name or u.username)[0].upper() }}
+                </div>
+              {% endif %}
+            </button>
+            <span class="text-xs text-gray-600 text-center leading-tight">{{ u.full_name or u.username }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Polling обновлений слота (вместо SSE) -->
+    <script>
+    (function() {
+      const slotId = {{ slot.id }};
+
+      function applySlotData(data) {
+        const card = document.getElementById('slot-card-' + slotId);
+        if (!card) return;
+        card.querySelector('.booked-count').textContent = data.booked;
+        card.querySelector('.free-count').textContent = data.free;
+        const bar = card.querySelector('.progress-bar');
+        bar.style.width = data.percent + '%';
+        bar.className = 'progress-bar h-2 rounded-full transition-all ' +
+          (data.percent >= 100 ? 'bg-red-400' : data.percent >= 70 ? 'bg-yellow-400' : 'bg-green-400');
+        const listEl = document.querySelector('.volunteers-list-' + slotId);
+        if (!listEl) return;
+        if (!data.volunteers || data.volunteers.length === 0) {
+          listEl.innerHTML = '';
+          return;
+        }
+        const canManage = listEl.dataset.canManage === 'true';
+        let html = '<div class="border-t border-gray-100 pt-3"><p class="text-xs text-gray-400 mb-3">Записались:</p><div class="flex flex-wrap gap-4">';
+        data.volunteers.forEach(function(v) {
+          const safeName = v.name.replace(/'/g, "\\'");
+          html += '<div class="flex flex-col items-center gap-1.5 w-16 relative">';
+          html += '<button type="button" onclick="showVolMenu(event,' + v.booking_id + ',' + v.user_id + ',\'' + safeName + '\',\'' + v.username + '\',' + canManage + ')" class="focus:outline-none cursor-pointer">';
+          if (v.avatar) {
+            html += '<img src="/static/avatars/' + v.avatar + '" class="w-14 h-14 rounded-full object-cover ring-2 ring-indigo-100 hover:ring-indigo-400 transition"/>';
+          } else {
+            html += '<div class="w-14 h-14 rounded-full bg-indigo-100 flex items-center justify-center text-xl font-bold text-indigo-500 ring-2 ring-indigo-100 hover:ring-indigo-400 transition">' + v.initial + '</div>';
+          }
+          html += '</button>';
+          html += '<span class="text-xs text-gray-600 text-center leading-tight">' + v.name + '</span></div>';
+        });
+        html += '</div></div>';
+        listEl.innerHTML = html;
+      }
+
+      var _timer = null;
+      var _abortCtrl = null;
+      var _inFlight = false;
+
+      function poll() {
+        if (_inFlight) return;
+        _inFlight = true;
+        _abortCtrl = new AbortController();
+        fetch('/api/slot-data/' + slotId, { signal: _abortCtrl.signal })
+          .then(function(r) { return r.json(); })
+          .then(applySlotData)
+          .catch(function() {})
+          .finally(function() { _inFlight = false; _abortCtrl = null; });
+      }
+      function start() { if (_timer) return; poll(); _timer = setInterval(poll, 3000); }
+      function stop()  { clearInterval(_timer); _timer = null; if (_abortCtrl) { _abortCtrl.abort(); } }
+
+      document.addEventListener('visibilitychange', function() {
+        if (document.hidden) stop(); else start();
+      });
+      window.addEventListener('beforeunload', stop);
+      start();
+    })();
+    </script>
+
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center text-gray-400 py-16">
+  <div class="text-4xl mb-3">📭</div>
+  <p>На этот день слотов нет</p>
+</div>
+{% endif %}
+
+<!-- Всплывающее меню волонтёра -->
+<div id="vol-menu"
+  style="display:none; position:absolute; z-index:1000; min-width:180px;"
+  class="bg-white rounded-2xl border border-gray-200 shadow-lg p-2">
+  <div id="vol-menu-name"
+    class="text-sm font-semibold text-gray-800 px-3 py-2 border-b border-gray-100 mb-1"></div>
+  <a id="vol-menu-profile" href="#"
+    class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition">
+    👤 Профиль
+  </a>
+  <a id="vol-menu-edit" href="#" style="display:none"
+    class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-600 hover:bg-indigo-50 hover:text-indigo-600 transition">
+    ✏️ Редактировать
+  </a>
+  <div id="vol-menu-manage" style="display:none">
+    <form id="vol-cancel-form" method="post" action="#">
+      <input type="hidden" name="redirect_to" id="vol-redirect-input"/>
+      <button type="submit"
+        class="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-500 hover:bg-red-50 transition">
+        ✕ Снять со смены
+      </button>
+    </form>
+  </div>
+</div>
+
+{% block extra_scripts %}
+<script>
+let menuOpen = false;
+
+function showVolMenu(e, bookingId, userId, userName, username, canManage) {
+  e.stopPropagation();
+
+  const menu = document.getElementById('vol-menu');
+  document.getElementById('vol-menu-name').textContent = userName;
+  document.getElementById('vol-menu-profile').href = '/profile/@' + username;
+
+  const editEl = document.getElementById('vol-menu-edit');
+  editEl.style.display = canManage ? 'flex' : 'none';
+  editEl.href = '/admin/user/' + userId + '/edit';
+
+  const manageEl = document.getElementById('vol-menu-manage');
+  manageEl.style.display = canManage ? 'block' : 'none';
+
+  if (canManage) {
+    document.getElementById('vol-cancel-form').action = '/logs/cancel/' + bookingId;
+    document.getElementById('vol-redirect-input').value = window.location.pathname;
+  }
+
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const scrollLeft = window.scrollX || document.documentElement.scrollLeft;
+
+  menu.style.display = 'block';
+  menu.style.top = (rect.bottom + scrollTop + 6) + 'px';
+
+  let left = rect.left + scrollLeft - 60;
+  if (left < 4) left = 4;
+  const menuW = menu.offsetWidth || 180;
+  if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8 + scrollLeft;
+  menu.style.left = left + 'px';
+
+  menuOpen = true;
+}
+
+document.addEventListener('click', function() {
+  if (menuOpen) {
+    document.getElementById('vol-menu').style.display = 'none';
+    menuOpen = false;
+  }
+});
+
+// ── Loading state для кнопок записи ────────────────────────────────────────
+document.querySelectorAll('form[action^="/book/"], form[action^="/cancel/"]').forEach(function(form) {
+  form.addEventListener('submit', function(e) {
+    const btn = form.querySelector('button[type="submit"]');
+    if (!btn || btn.disabled) {
+      e.preventDefault();
+      return;
+    }
+    btn.disabled = true;
+    const originalText = btn.textContent.trim();
+    btn.innerHTML = '<span class="inline-block animate-spin mr-1">⟳</span>' + 
+      (originalText === 'Записаться' ? 'Записываем...' : 'Отменяем...');
+  });
+});
+</script>
+{% endblock %}
+{% endblock %}

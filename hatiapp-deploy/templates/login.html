@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Вход</title>
+  <script src="/static/tailwind.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.tailwindcss.com';document.head.appendChild(s)"></script>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center">
+  <div class="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
+    <div class="text-center mb-6">
+      <div class="text-4xl mb-2">📋</div>
+      <h1 class="text-2xl font-bold text-gray-800">Расписание</h1>
+      <p class="text-gray-400 text-sm mt-1">Войдите в свой аккаунт</p>
+    </div>
+
+    {% if error %}
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/login" class="flex flex-col gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Логин</label>
+        <input
+          type="text" name="username" required autofocus
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+          placeholder="Введите логин"
+        />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+        <input
+          type="password" name="password" required
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+          placeholder="Введите пароль"
+        />
+      </div>
+      <button
+        type="submit"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg py-2 text-sm transition"
+      >
+        Войти
+      </button>
+    </form>
+
+    {% if site_qr_b64 %}
+    <div class="mt-6 pt-5 border-t border-gray-100">
+      <p class="text-xs text-gray-400 text-center mb-4">
+        {% if wifi_ssid %}Подключитесь к сети и откройте сайт{% else %}Откройте сайт на телефоне{% endif %}
+      </p>
+      <div class="{% if wifi_qr_b64 %}grid grid-cols-2 gap-4{% else %}flex justify-center{% endif %} text-center">
+        {% if wifi_qr_b64 %}
+        <div>
+          <img src="data:image/png;base64,{{ wifi_qr_b64 }}"
+               class="w-28 h-28 mx-auto rounded-xl border border-gray-100"/>
+          <p class="text-xs text-gray-500 mt-1 font-medium">📶 WiFi</p>
+          <p class="text-xs text-gray-400">{{ wifi_ssid }}</p>
+          {% if wifi_pass %}<p class="text-xs text-gray-300">{{ wifi_pass }}</p>{% endif %}
+        </div>
+        {% endif %}
+        <div>
+          <img src="data:image/png;base64,{{ site_qr_b64 }}"
+               class="w-28 h-28 mx-auto rounded-xl border border-gray-100"/>
+          <p class="text-xs text-gray-500 mt-1 font-medium">🌐 Сайт</p>
+          <p class="text-xs text-gray-400">{{ site_url or server_ip }}</p>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  <script>
+    // Простая валидация: показываем loader при отправке
+    document.querySelector('form').addEventListener('submit', function(e) {
+      const btn = this.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="inline-block animate-spin mr-2">⟳</span>Вход...';
+    });
+  </script>
+</body>
+</html>

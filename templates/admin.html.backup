@@ -1,0 +1,800 @@
+{% extends "base.html" %}
+{% block title %}Админ-панель{% endblock %}
+
+{# Для админки — полная ширина экрана, без max-w-6xl ограничения #}
+{% block main_class %}max-w-full w-full{% endblock %}
+
+{% block content %}
+
+<!-- ═══ ШАПКА ═══ -->
+<div class="mb-5 flex items-center justify-between flex-wrap gap-3">
+  <div>
+    <h1 class="text-xl font-bold text-gray-800">Админ-панель</h1>
+    <p class="text-xs text-gray-400 mt-0.5">Управление пользователями, направлениями и расписанием</p>
+  </div>
+  <!-- Кнопки действий -->
+  <div class="flex flex-wrap gap-2 items-center">
+    <input type="date" id="export-date" value="{{ today }}"
+      class="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+    <a id="export-btn" href="/admin/export?day={{ today }}"
+      class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-xl transition">
+      ⬇ Excel
+    </a>
+    <a id="print-btn" href="/admin/print?day={{ today }}" target="_blank"
+      class="bg-slate-600 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-xl transition">
+      🖨 Печать
+    </a>
+    <a href="/admin/import"
+      class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded-xl transition">
+      👤 Волонтёры
+    </a>
+    <div class="relative" id="schedule-menu-wrap">
+      <button onclick="toggleScheduleMenu()"
+        class="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white text-sm px-4 py-2 rounded-xl transition">
+        📅 Расписание
+        <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5"
+             id="schedule-chevron" style="transition: transform .2s ease">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+        </svg>
+      </button>
+      <div id="schedule-menu"
+        class="absolute right-0 mt-1 w-48 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden z-50"
+        style="display:none; animation: fadeSlideDown .15s ease-out both">
+        <a href="/admin/import-schedule"
+          class="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
+          <span class="text-base">📥</span> Загрузить расписание
+        </a>
+        <div class="border-t border-gray-100"></div>
+        <a href="/admin/slots"
+          class="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
+          <span class="text-base">✏️</span> Редактор смен
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  @keyframes fadeSlideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  /* Десктоп/ноутбук: 2 колонки */
+  .admin-grid {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 1.5rem;
+    align-items: start;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .admin-main {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .admin-sidebar {
+    min-width: 0;
+  }
+  /* Таблицы скроллятся если не влезают */
+  .admin-main .overflow-x-auto {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Планшет и мобильные: 1 колонка */
+  @media (max-width: 1023px) {
+    .admin-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<!-- ═══ СТАТИСТИКА (горизонтальная полоса) ═══ -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 text-center">
+    <div class="text-2xl font-bold text-indigo-600">{{ users | length }}</div>
+    <div class="text-xs text-gray-400 mt-1">Пользователей</div>
+  </div>
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 text-center">
+    <div class="text-2xl font-bold text-green-600">{{ dir_stats | length }}</div>
+    <div class="text-xs text-gray-400 mt-1">Направлений</div>
+  </div>
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 text-center">
+    <div class="text-2xl font-bold text-yellow-500">{{ bookings_count }}</div>
+    <div class="text-xs text-gray-400 mt-1">Записей</div>
+  </div>
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 text-center">
+    <div class="text-2xl font-bold text-red-500">{{ blocked_days | length }}</div>
+    <div class="text-xs text-gray-400 mt-1">Блокировок</div>
+  </div>
+</div>
+
+<!-- ═══ ДВУХКОЛОНОЧНЫЙ LAYOUT (только десктоп) ═══ -->
+<div class="admin-grid">
+
+  <!-- ═══ ЛЕВАЯ КОЛОНКА: Пользователи + Направления ═══ -->
+  <div class="admin-main">
+
+    <!-- ── Направления ── -->
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="text-base font-semibold text-gray-700">Направления</h2>
+    </div>
+
+    <!-- ДЕСКТОП: таблица -->
+    <div class="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-x-auto mb-6">
+      <table class="w-full text-sm min-w-[700px]">
+        <thead class="bg-gray-50 text-gray-400 text-xs uppercase">
+          <tr>
+            <th class="text-left px-4 py-2.5">Направление</th>
+            <th class="text-left px-4 py-2.5">Руководитель</th>
+            <th class="text-center px-4 py-2.5">Мест</th>
+            <th class="text-center px-4 py-2.5">Занято</th>
+            <th class="text-center px-4 py-2.5">Явка</th>
+            <th class="px-4 py-2.5 w-32">Заполн.</th>
+            <th class="px-4 py-2.5"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for item in dir_stats %}
+          {% set pct = (item.booked / item.total * 100) | int if item.total > 0 else 0 %}
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-2.5 font-medium text-gray-800">{{ item.direction.name }}</td>
+            <td class="px-4 py-2.5 text-gray-500 text-xs">
+              {{ item.direction.leader.full_name if item.direction.leader else '—' }}
+            </td>
+            <td class="px-4 py-2.5 text-center text-gray-600 font-mono text-xs">{{ item.total }}</td>
+            <td class="px-4 py-2.5 text-center text-gray-600 font-mono text-xs">{{ item.booked }}</td>
+            <td class="px-4 py-2.5 text-center">
+              {% if item.attended > 0 %}
+                <span class="text-green-600 font-medium text-xs">{{ item.attended }}</span>
+                <span class="text-xs text-gray-400">/ {{ item.booked }}</span>
+              {% else %}
+                <span class="text-gray-300 text-xs">—</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="flex-1 bg-gray-100 rounded-full h-1.5 min-w-[60px]">
+                  <div class="h-1.5 rounded-full {% if pct >= 100 %}bg-red-400{% elif pct >= 70 %}bg-yellow-400{% else %}bg-green-400{% endif %}"
+                    style="width:{{ pct }}%"></div>
+                </div>
+                <span class="text-xs text-gray-400 w-7 text-right">{{ pct }}%</span>
+              </div>
+            </td>
+            <td class="px-4 py-2.5">
+              <div class="flex items-center gap-1.5">
+                <select onchange="assignLeader({{ item.direction.id }}, this.value)"
+                  class="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 focus:outline-none w-28">
+                  <option value="">— назначить —</option>
+                  {% for u in users if u.role == 'leader' %}
+                  <option value="{{ u.id }}" {% if item.direction.leader_id == u.id %}selected{% endif %}>
+                    {{ u.full_name or u.username }}
+                  </option>
+                  {% endfor %}
+                </select>
+                <form method="post" action="/admin/direction/{{ item.direction.id }}/delete"
+                  onsubmit="return confirm('Удалить «{{ item.direction.name }}»?')" class="inline">
+                  <button class="text-gray-300 hover:text-red-500 transition text-sm px-1">✕</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- МОБАЙЛ: карточки -->
+    <div class="md:hidden flex flex-col gap-2 mb-6">
+      {% for item in dir_stats %}
+      {% set pct = (item.booked / item.total * 100) | int if item.total > 0 else 0 %}
+      <div class="bg-white rounded-2xl border border-gray-200 p-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="font-semibold text-gray-800">{{ item.direction.name }}</span>
+          <form method="post" action="/admin/direction/{{ item.direction.id }}/delete"
+            onsubmit="return confirm('Удалить «{{ item.direction.name }}»?')">
+            <button class="text-gray-300 hover:text-red-500 transition text-lg px-1">✕</button>
+          </form>
+        </div>
+        <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2">
+          <div class="h-1.5 rounded-full {% if pct >= 100 %}bg-red-400{% elif pct >= 70 %}bg-yellow-400{% else %}bg-green-400{% endif %}"
+            style="width:{{ pct }}%"></div>
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs text-gray-400">
+            {{ item.booked }}/{{ item.total }} · {{ pct }}%
+            {% if item.attended > 0 %} · явка: {{ item.attended }}{% endif %}
+          </span>
+          <select onchange="assignLeader({{ item.direction.id }}, this.value)"
+            class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none max-w-[160px]">
+            <option value="">— руководитель —</option>
+            {% for u in users if u.role == 'leader' %}
+            <option value="{{ u.id }}" {% if item.direction.leader_id == u.id %}selected{% endif %}>
+              {{ u.full_name or u.username }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        {% if item.direction.leader %}
+        <p class="text-xs text-indigo-500 mt-1">👤 {{ item.direction.leader.full_name or item.direction.leader.username }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- ── Пользователи ── -->
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="text-base font-semibold text-gray-700">Пользователи</h2>
+      <div class="relative flex-1 max-w-xs">
+        <svg viewBox="0 0 24 24" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+             fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+        </svg>
+        <input type="text" id="user-search" placeholder="Поиск по имени или логину..."
+          oninput="filterUsers(this.value)"
+          class="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+      </div>
+    </div>
+    <p class="text-xs text-gray-400 mb-3" id="user-count-label"></p>
+
+    <!-- Массовые действия -->
+    <div id="mass-actions" class="hidden mb-3 flex items-center gap-2">
+      <span class="text-xs text-gray-500">Выбрано: <span id="mass-count">0</span></span>
+      <button type="button" data-action="activate" class="mass-btn text-xs px-3 py-1.5 rounded-lg border border-green-200 text-green-600 hover:bg-green-50 transition">✅ Активировать</button>
+      <button type="button" data-action="deactivate" class="mass-btn text-xs px-3 py-1.5 rounded-lg border border-yellow-200 text-yellow-600 hover:bg-yellow-50 transition">🔒 Деактивировать</button>
+      <button type="button" data-action="delete" class="mass-btn text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition">✕ Удалить</button>
+    </div>
+
+    <!-- Скрытая форма для массовых действий -->
+    <form method="post" action="/admin/users/mass-action" id="mass-action-form" class="hidden">
+      <input type="hidden" name="action" id="mass-action-input">
+    </form>
+
+    <!-- ДЕСКТОП: таблица -->
+    <div class="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+      <table class="w-full text-sm min-w-[700px]" id="users-table">
+        <thead class="bg-gray-50 text-gray-400 text-xs uppercase">
+          <tr>
+            <th class="text-center px-2 py-2.5 w-10"><input type="checkbox" id="select-all" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-400"></th>
+            <th class="text-left px-4 py-2.5">Пользователь</th>
+            <th class="text-left px-4 py-2.5">Логин</th>
+            <th class="text-center px-4 py-2.5">Роль</th>
+            <th class="text-center px-4 py-2.5">Смен</th>
+            <th class="text-center px-4 py-2.5">Статус</th>
+            <th class="text-right px-4 py-2.5">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for u in users %}
+          <tr class="user-row hover:bg-gray-50 {% if not u.is_active %}opacity-50{% endif %} cursor-pointer"
+              data-search="{{ (u.full_name or '') | lower }} {{ u.username | lower }} {{ u.role | lower }}"
+              onclick="goToProfile(event, '/profile/@{{ u.username }}')">
+            <td class="px-2 py-2.5 text-center" onclick="event.stopPropagation()">
+              <input type="checkbox" name="user_ids" value="{{ u.id }}" class="user-checkbox rounded border-gray-300 text-indigo-600 focus:ring-indigo-400">
+            </td>
+            <td class="px-4 py-2.5">
+              <div class="flex items-center gap-3">
+                {% if u.avatar %}
+                  <img src="/static/avatars/{{ u.avatar }}" class="w-8 h-8 rounded-full object-cover"/>
+                {% else %}
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold
+                    {% if u.role == 'admin' %}bg-purple-100 text-purple-600
+                    {% elif u.role == 'leader' %}bg-blue-100 text-blue-600
+                    {% elif u.role == 'lotos' %}bg-pink-100 text-pink-600
+                    {% else %}bg-gray-100 text-gray-500{% endif %}">
+                    {{ (u.full_name or u.username)[0].upper() }}
+                  </div>
+                {% endif %}
+                <span class="font-medium text-gray-800 hover:text-indigo-600 transition">{{ u.full_name or '—' }}</span>
+              </div>
+            </td>
+            <td class="px-4 py-2.5 text-gray-500 text-xs">{{ u.username }}</td>
+            <td class="px-4 py-2.5 text-center">
+              <span class="text-xs px-2 py-0.5 rounded-full
+                {% if u.role == 'admin' %}bg-purple-100 text-purple-700
+                {% elif u.role == 'leader' %}bg-blue-100 text-blue-700
+                {% elif u.role == 'lotos' %}bg-pink-100 text-pink-700
+                {% else %}bg-gray-100 text-gray-600{% endif %}">
+                {{ u.role }}
+              </span>
+            </td>
+            <td class="px-4 py-2.5 text-center text-gray-500 text-xs font-mono">{{ u.bookings | length }}</td>
+            <td class="px-4 py-2.5 text-center">
+              <span class="text-xs {% if u.is_active %}text-green-600{% else %}text-red-500{% endif %}">
+                {% if u.is_active %}Активен{% else %}Заблок.{% endif %}
+              </span>
+            </td>
+            <td class="px-4 py-2.5 text-right" onclick="event.stopPropagation()">
+              <div class="flex items-center justify-end gap-1.5">
+                <a href="/admin/user/{{ u.id }}/edit"
+                  class="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                  ✏️
+                </a>
+                {% if u.role != 'admin' %}
+                <form method="post" action="/admin/user/{{ u.id }}/toggle" class="inline">
+                  <button class="text-xs px-2.5 py-1.5 rounded-lg border transition
+                    {% if u.is_active %}border-yellow-200 text-yellow-600 hover:bg-yellow-50
+                    {% else %}border-green-200 text-green-600 hover:bg-green-50{% endif %}">
+                    {% if u.is_active %}🔒{% else %}✅{% endif %}
+                  </button>
+                </form>
+                <form method="post" action="/admin/user/{{ u.id }}/delete"
+                  onsubmit="return confirm('Удалить «{{ u.username }}»?')" class="inline">
+                  <button class="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition">✕</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div id="no-users" class="hidden py-10 text-center text-sm text-gray-400">Никто не найден</div>
+    </div>
+
+    <!-- МОБАЙЛ: карточки -->
+    <div class="md:hidden flex flex-col gap-2" id="users-mobile">
+      {% for u in users %}
+      <div class="user-row bg-white rounded-2xl border border-gray-200 p-4 {% if not u.is_active %}opacity-50{% endif %}"
+           data-search="{{ (u.full_name or '') | lower }} {{ u.username | lower }} {{ u.role | lower }}">
+        <div class="flex items-center gap-2 mb-3">
+          <input type="checkbox" name="user_ids" value="{{ u.id }}" class="user-checkbox rounded border-gray-300 text-indigo-600 focus:ring-indigo-400 flex-shrink-0">
+          <a href="/profile/@{{ u.username }}" class="flex items-center gap-3 flex-1">
+          {% if u.avatar %}
+            <img src="/static/avatars/{{ u.avatar }}" class="w-10 h-10 rounded-full object-cover flex-shrink-0"/>
+          {% else %}
+            <div class="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold
+              {% if u.role == 'admin' %}bg-purple-100 text-purple-600
+              {% elif u.role == 'leader' %}bg-blue-100 text-blue-600
+              {% elif u.role == 'lotos' %}bg-pink-100 text-pink-600
+              {% else %}bg-gray-100 text-gray-500{% endif %}">
+              {{ (u.full_name or u.username)[0].upper() }}
+            </div>
+          {% endif %}
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-medium text-gray-800 text-sm">{{ u.full_name or '—' }}</span>
+              <span class="text-xs px-2 py-0.5 rounded-full
+                {% if u.role == 'admin' %}bg-purple-100 text-purple-700
+                {% elif u.role == 'leader' %}bg-blue-100 text-blue-700
+                {% elif u.role == 'lotos' %}bg-pink-100 text-pink-700
+                {% else %}bg-gray-100 text-gray-600{% endif %}">
+                {{ u.role }}
+              </span>
+            </div>
+            <p class="text-xs text-gray-400 mt-0.5">@{{ u.username }} · {{ u.bookings | length }} смен</p>
+          </div>
+          <svg viewBox="0 0 24 24" class="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/>
+          </svg>
+        </a>
+        <div class="flex gap-2">
+          <a href="/admin/user/{{ u.id }}/edit"
+            class="flex-1 text-center text-xs py-2 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+            ✏️ Изменить
+          </a>
+          {% if u.role != 'admin' %}
+          <form method="post" action="/admin/user/{{ u.id }}/toggle" class="flex-1">
+            <button class="w-full text-xs py-2 rounded-xl border transition
+              {% if u.is_active %}border-yellow-200 text-yellow-600 hover:bg-yellow-50
+              {% else %}border-green-200 text-green-600 hover:bg-green-50{% endif %}">
+              {% if u.is_active %}🔒 Заблок.{% else %}✅ Актив.{% endif %}
+            </button>
+          </form>
+          <form method="post" action="/admin/user/{{ u.id }}/delete"
+            onsubmit="return confirm('Удалить «{{ u.username }}»?')">
+            <button class="text-xs px-4 py-2 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 transition">✕</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      <div id="no-users-mobile" class="hidden py-10 text-center text-sm text-gray-400">Никто не найден</div>
+    </div>
+  </div>
+
+  <!-- ═══ ПРАВАЯ КОЛОНКА: Блокировки + Тема + Быстрые действия ═══ -->
+  <div class="admin-sidebar space-y-5">
+
+    <!-- ── Блокировка записи на день ── -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-5">
+      <div class="flex items-center gap-2 mb-4">
+        <span class="text-lg">🔒</span>
+        <div>
+          <h2 class="font-semibold text-gray-800 text-sm">Блокировка записи</h2>
+          <p class="text-xs text-gray-400">Запретить запись на выбранные дни</p>
+        </div>
+      </div>
+
+      <form method="post" action="/admin/blocked-days/add" class="flex flex-col gap-3 mb-4">
+        <select name="block_date" required
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+          <option value="">Выберите день из расписания...</option>
+          {% for d in schedule_dates %}
+          <option value="{{ d.isoformat() }}">
+            {{ d.strftime('%d.%m.%Y') }} ({{ ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'][d.weekday()] }})
+          </option>
+          {% endfor %}
+        </select>
+        {% if not schedule_dates %}
+        <p class="text-xs text-gray-400 text-center">Расписание не загружено</p>
+        {% endif %}
+        <input type="text" name="reason" placeholder="Причина (необязательно)"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+        <button type="submit" {% if not schedule_dates %}disabled{% endif %}
+          class="w-full bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm px-4 py-2 rounded-xl transition">
+          🔒 Заблокировать день
+        </button>
+      </form>
+
+      {% if blocked_days %}
+      <div class="border-t border-gray-100 pt-3">
+        <p class="text-xs text-gray-400 mb-2">Заблокированные дни:</p>
+        <div class="space-y-1.5 max-h-48 overflow-y-auto">
+          {% for bd in blocked_days %}
+          <div class="flex items-center justify-between bg-red-50 rounded-lg px-3 py-2">
+            <div class="min-w-0">
+              <span class="text-sm font-medium text-red-700">{{ bd.date.strftime('%d.%m.%Y') }}</span>
+              {% if bd.reason %}
+              <p class="text-xs text-red-400 truncate">{{ bd.reason }}</p>
+              {% endif %}
+            </div>
+            <form method="post" action="/admin/blocked-days/{{ bd.id }}/remove" class="flex-shrink-0 ml-2">
+              <button class="text-red-400 hover:text-red-600 transition text-sm">✕</button>
+            </form>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% else %}
+      <div class="border-t border-gray-100 pt-3 text-center">
+        <p class="text-xs text-gray-400">Нет заблокированных дней</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ── Быстрые действия ── -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-5">
+      <h2 class="font-semibold text-gray-800 text-sm mb-3">⚡ Быстрые действия</h2>
+      <div class="space-y-2">
+        <a href="/admin/import"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 transition text-sm text-gray-700">
+          <span class="text-base">👤</span>
+          <span>Импорт волонтёров</span>
+        </a>
+        <a href="/admin/import-schedule"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 transition text-sm text-gray-700">
+          <span class="text-base">📥</span>
+          <span>Импорт расписания</span>
+        </a>
+        <a href="/admin/slots"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 transition text-sm text-gray-700">
+          <span class="text-base">✏️</span>
+          <span>Редактор смен</span>
+        </a>
+        <a href="/admin/lotos-report"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 transition text-sm text-gray-700">
+          <span class="text-base">📋</span>
+          <span>Отчёт для лотосов</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- ── График посещаемости ── -->
+    {% if attendance_chart %}
+    <div class="bg-white rounded-2xl border border-gray-200 p-5">
+      <h2 class="font-semibold text-gray-800 text-sm mb-3">📊 Посещаемость</h2>
+      <canvas id="attendance-chart" width="280" height="160"></canvas>
+      <div class="flex items-center justify-center gap-4 mt-2 text-xs text-gray-400">
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-400"></span> Записались</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-400"></span> Пришли</span>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Цветовая тема ── -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-800 text-sm">🎨 Цвет приложения</h2>
+          <p class="text-xs text-gray-400 mt-0.5">Меняется у всех пользователей</p>
+        </div>
+        {% if request.query_params.get('theme_saved') %}
+        <span class="text-xs text-green-600 bg-green-50 px-3 py-1 rounded-full font-medium">✓ Сохранено</span>
+        {% endif %}
+      </div>
+      <form method="post" action="/admin/settings/theme" id="theme-form">
+        <div class="flex flex-wrap gap-2 mb-4" id="theme-swatches">
+          {% set themes = [
+            ("indigo",  "Индиго",      "#4f46e5"),
+            ("violet",  "Фиолетовый",  "#7c3aed"),
+            ("blue",    "Синий",       "#2563eb"),
+            ("teal",    "Бирюзовый",   "#0d9488"),
+            ("emerald", "Изумрудный",  "#059669"),
+            ("rose",    "Розовый",     "#e11d48"),
+            ("amber",   "Янтарный",    "#d97706"),
+          ] %}
+          {% for key, label, hex in themes %}
+          <label class="theme-swatch cursor-pointer" title="{{ label }}">
+            <input type="radio" name="theme" value="{{ key }}"
+              {% if current_theme == key %}checked{% endif %}
+              class="sr-only theme-radio"
+              onchange="previewTheme('{{ key }}')"/>
+            <div class="theme-dot w-8 h-8 rounded-full border-2 transition-all duration-200 flex items-center justify-center"
+                 style="background: {{ hex }}; border-color: {{ hex }}"
+                 data-theme="{{ key }}" data-hex="{{ hex }}">
+              {% if current_theme == key %}
+              <svg viewBox="0 0 24 24" class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" stroke-width="3">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/>
+              </svg>
+              {% endif %}
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+        <button type="submit"
+          class="w-full px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm transition active:scale-95">
+          Применить тему
+        </button>
+      </form>
+    </div>
+
+    <!-- ── Сводка по ролям ── -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-5">
+      <h2 class="font-semibold text-gray-800 text-sm mb-3">👥 По ролям</h2>
+      <div class="space-y-2">
+        {% set role_counts = {} %}
+        {% for u in users %}
+          {% set _ = role_counts.update({u.role: (role_counts.get(u.role, 0) + 1)}) %}
+        {% endfor %}
+        
+        <div class="flex items-center justify-between text-sm">
+          <span class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+            <span class="text-gray-600">Админы</span>
+          </span>
+          <span class="font-mono font-medium text-gray-800">{{ role_counts.get('admin', 0) }}</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+            <span class="text-gray-600">Руководители</span>
+          </span>
+          <span class="font-mono font-medium text-gray-800">{{ role_counts.get('leader', 0) }}</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-pink-400"></span>
+            <span class="text-gray-600">Лотос</span>
+          </span>
+          <span class="font-mono font-medium text-gray-800">{{ role_counts.get('lotos', 0) }}</span>
+        </div>
+        <div class="flex items-center justify-between text-sm">
+          <span class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+            <span class="text-gray-600">Волонтёры</span>
+          </span>
+          <span class="font-mono font-medium text-gray-800">{{ role_counts.get('volunteer', 0) }}</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  document.getElementById('export-date').addEventListener('change', function() {
+    document.getElementById('export-btn').href = '/admin/export?day=' + this.value;
+    document.getElementById('print-btn').href  = '/admin/print?day='  + this.value;
+  });
+  function assignLeader(dirId, userId) {
+    if (!userId) return;
+    fetch(`/admin/direction/${dirId}/leader/${userId}`, { method: 'POST' })
+      .then(() => location.reload());
+  }
+
+  function toggleScheduleMenu() {
+    const menu = document.getElementById('schedule-menu');
+    const chevron = document.getElementById('schedule-chevron');
+    const isOpen = menu.style.display !== 'none';
+    menu.style.display = isOpen ? 'none' : 'block';
+    chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+  }
+  document.addEventListener('click', function(e) {
+    const wrap = document.getElementById('schedule-menu-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById('schedule-menu').style.display = 'none';
+      document.getElementById('schedule-chevron').style.transform = '';
+    }
+  });
+
+  function goToProfile(event, url) {
+    if (event.target.closest('button, a, form, select')) return;
+    window.location.href = url;
+  }
+
+  // Поиск пользователей
+  const totalUsers = document.querySelectorAll('.user-row').length;
+  updateCountLabel(totalUsers);
+
+  function filterUsers(q) {
+    const query = q.trim().toLowerCase();
+    const rows = document.querySelectorAll('.user-row');
+    let visible = 0;
+    rows.forEach(function(row) {
+      const text = row.dataset.search || '';
+      const show = !query || text.includes(query);
+      row.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    const noDesk = document.getElementById('no-users');
+    const noMob  = document.getElementById('no-users-mobile');
+    if (noDesk) noDesk.classList.toggle('hidden', visible > 0);
+    if (noMob)  noMob.classList.toggle('hidden', visible > 0);
+    updateCountLabel(visible);
+  }
+
+  function updateCountLabel(count) {
+    const el = document.getElementById('user-count-label');
+    if (el) el.textContent = count + ' из ' + totalUsers + ' пользователей';
+  }
+
+  // ── Массовые действия ─────────────────────────────────────────────────────
+  (function() {
+    const selectAll = document.getElementById('select-all');
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    const massBar = document.getElementById('mass-actions');
+    const massCount = document.getElementById('mass-count');
+    const hiddenForm = document.getElementById('mass-action-form');
+    const actionInput = document.getElementById('mass-action-input');
+
+    function updateMassBar() {
+      const checked = document.querySelectorAll('.user-checkbox:checked');
+      if (massCount) massCount.textContent = checked.length;
+      if (massBar) massBar.classList.toggle('hidden', checked.length === 0);
+    }
+
+    if (selectAll) {
+      selectAll.addEventListener('change', function() {
+        checkboxes.forEach(cb => cb.checked = selectAll.checked);
+        updateMassBar();
+      });
+    }
+
+    checkboxes.forEach(function(cb) {
+      cb.addEventListener('change', updateMassBar);
+    });
+
+    document.querySelectorAll('.mass-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const action = btn.dataset.action;
+        const checked = document.querySelectorAll('.user-checkbox:checked');
+        if (checked.length === 0) return;
+        if (action === 'delete' && !confirm('Удалить выбранных пользователей?')) return;
+
+        // Очистить старые скрытые поля
+        hiddenForm.querySelectorAll('input[name="user_ids"]').forEach(el => el.remove());
+
+        // Добавить новые
+        checked.forEach(function(cb) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'user_ids';
+          input.value = cb.value;
+          hiddenForm.appendChild(input);
+        });
+
+        actionInput.value = action;
+        hiddenForm.submit();
+      });
+    });
+
+    updateMassBar();
+  })();
+
+  // Предпросмотр цвета
+  const PALETTES = {
+    indigo:  { 50:"#eef2ff",100:"#e0e7ff",200:"#c7d2fe",300:"#a5b4fc",400:"#818cf8",500:"#6366f1",600:"#4f46e5",700:"#4338ca",800:"#3730a3",900:"#312e81" },
+    violet:  { 50:"#f5f3ff",100:"#ede9fe",200:"#ddd6fe",300:"#c4b5fd",400:"#a78bfa",500:"#8b5cf6",600:"#7c3aed",700:"#6d28d9",800:"#5b21b6",900:"#4c1d95" },
+    blue:    { 50:"#eff6ff",100:"#dbeafe",200:"#bfdbfe",300:"#93c5fd",400:"#60a5fa",500:"#3b82f6",600:"#2563eb",700:"#1d4ed8",800:"#1e40af",900:"#1e3a8a" },
+    teal:    { 50:"#f0fdfa",100:"#ccfbf1",200:"#99f6e4",300:"#5eead4",400:"#2dd4bf",500:"#14b8a6",600:"#0d9488",700:"#0f766e",800:"#115e59",900:"#134e4a" },
+    emerald: { 50:"#ecfdf5",100:"#d1fae5",200:"#a7f3d0",300:"#6ee7b7",400:"#34d399",500:"#10b981",600:"#059669",700:"#047857",800:"#065f46",900:"#064e3b" },
+    rose:    { 50:"#fff1f2",100:"#ffe4e6",200:"#fecdd3",300:"#fda4af",400:"#fb7185",500:"#f43f5e",600:"#e11d48",700:"#be123c",800:"#9f1239",900:"#881337" },
+    amber:   { 50:"#fffbeb",100:"#fef3c7",200:"#fde68a",300:"#fcd34d",400:"#fbbf24",500:"#f59e0b",600:"#d97706",700:"#b45309",800:"#92400e",900:"#78350f" },
+  };
+
+  function previewTheme(name) {
+    const p = PALETTES[name];
+    if (!p) return;
+    const root = document.documentElement;
+    Object.entries(p).forEach(([k, v]) => root.style.setProperty('--p' + k, v));
+    document.querySelectorAll('.theme-dot').forEach(dot => {
+      dot.innerHTML = '';
+      if (dot.dataset.theme === name) {
+        dot.innerHTML = '<svg viewBox="0 0 24 24" class="w-3.5 h-3.5" style="color:white" fill="none" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>';
+        dot.style.transform = 'scale(1.15)';
+        dot.style.boxShadow = `0 0 0 3px white, 0 0 0 5px ${p['600']}`;
+      } else {
+        dot.style.transform = '';
+        dot.style.boxShadow = '';
+      }
+    });
+  }
+
+  (function() {
+    const checked = document.querySelector('.theme-radio:checked');
+    if (checked) {
+      const name = checked.value;
+      const dot = document.querySelector(`.theme-dot[data-theme="${name}"]`);
+      if (dot) {
+        const hex = dot.dataset.hex;
+        dot.style.transform = 'scale(1.15)';
+        dot.style.boxShadow = `0 0 0 3px white, 0 0 0 5px ${hex}`;
+      }
+    }
+  })();
+
+  // ── График посещаемости ───────────────────────────────────────────────────
+  (function() {
+    const canvas = document.getElementById('attendance-chart');
+    if (!canvas) return;
+    
+    const data = {{ attendance_chart | tojson }};
+    if (!data || data.length === 0) return;
+    
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    
+    const w = rect.width, h = rect.height;
+    const pad = { top: 10, right: 10, bottom: 30, left: 30 };
+    const chartW = w - pad.left - pad.right;
+    const chartH = h - pad.top - pad.bottom;
+    
+    const maxVal = Math.max(...data.map(d => Math.max(d.booked, d.attended)), 1);
+    const barW = chartW / data.length * 0.35;
+    const gap = chartW / data.length * 0.1;
+    const step = chartW / data.length;
+    
+    // Очистка
+    ctx.clearRect(0, 0, w, h);
+    
+    // Сетка
+    ctx.strokeStyle = '#e5e7eb';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + chartH * (i / 4);
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(w - pad.right, y);
+      ctx.stroke();
+      // Подписи слева
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(Math.round(maxVal * (1 - i / 4)), pad.left - 4, y + 3);
+    }
+    
+    // Столбики
+    data.forEach(function(d, i) {
+      const x = pad.left + i * step + (step - barW * 2 - gap) / 2;
+      const h1 = (d.booked / maxVal) * chartH;
+      const h2 = (d.attended / maxVal) * chartH;
+      
+      // Записались (indigo)
+      ctx.fillStyle = '#818cf8';
+      ctx.fillRect(x, pad.top + chartH - h1, barW, h1);
+      
+      // Пришли (green)
+      ctx.fillStyle = '#4ade80';
+      ctx.fillRect(x + barW + gap, pad.top + chartH - h2, barW, h2);
+      
+      // Подписи дат
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(d.date_fmt, x + barW + gap / 2, h - 6);
+    });
+  })();
+</script>
+{% endblock %}

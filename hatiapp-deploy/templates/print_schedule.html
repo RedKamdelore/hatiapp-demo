@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Расписание {{ target_date.strftime('%d.%m.%Y') }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f3f4f6;
+      color: #111;
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    .page {
+      max-width: 297mm;
+      margin: 16px auto;
+      padding: 10mm 12mm;
+      background: #fff;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border-radius: 10px;
+    }
+
+    /* ── Панель управления ─────────────────────────────────── */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      flex-wrap: wrap;
+    }
+    .controls label {
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 500;
+    }
+    .controls select {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      background: #fff;
+      min-width: 160px;
+    }
+    .btn {
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-primary { background: #4f46e5; color: #fff; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-success { background: #059669; color: #fff; }
+    .btn-success:hover { background: #047857; }
+    .btn-back {
+      color: #6b7280;
+      font-size: 12px;
+      text-decoration: none;
+      margin-left: auto;
+    }
+    .btn-back:hover { color: #111; }
+
+    /* ── Предупреждение о печати ───────────────────────────── */
+    .print-warning {
+      background: #fef3c7;
+      border: 2px dashed #f59e0b;
+      color: #92400e;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .print-warning strong {
+      font-weight: 700;
+    }
+
+    /* ── Шапка ─────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-bottom: 2px solid #4f46e5;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+    .header-left h1 {
+      font-size: 20px;
+      font-weight: 800;
+      color: #1e293b;
+      letter-spacing: -0.3px;
+    }
+    .header-left p {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+    .header-right {
+      text-align: right;
+    }
+    .header-right .date-big {
+      font-size: 26px;
+      font-weight: 800;
+      color: #4f46e5;
+      line-height: 1;
+    }
+    .header-right .weekday {
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    /* ── Статистика ────────────────────────────────────────── */
+    .stats-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+      font-size: 11px;
+      color: #64748b;
+    }
+    .stat-item strong {
+      color: #1e293b;
+      font-size: 13px;
+    }
+    .stat-item.stat-full strong { color: #dc2626; }
+
+    /* ── ТРИ СТОЛБИКА ──────────────────────────────────────── */
+    .three-columns {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .col { min-width: 0; }
+
+    /* ── Направление (отдельная таблица) ───────────────────── */
+    .dir-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+      margin-bottom: 14px;
+    }
+    .dir-table:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Заголовок направления */
+    .dir-caption {
+      background: #4f46e5;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 5px 8px;
+      text-align: left;
+      border-radius: 4px 4px 0 0;
+      letter-spacing: 0.3px;
+    }
+
+    /* Подзаголовки колонок */
+    .dir-table thead th {
+      background: #eef2ff;
+      color: #4f46e5;
+      font-size: 7px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 3px 6px;
+      text-align: left;
+      border-bottom: 1px solid #c7d2fe;
+    }
+    .dir-table thead th.text-center { text-align: center; }
+
+    /* Строки */
+    .dir-table tbody tr {
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .dir-table tbody tr:last-child {
+      border-bottom: none;
+    }
+    .dir-table tbody tr:nth-child(even) {
+      background: #f8fafc;
+    }
+
+    .dir-table td {
+      padding: 3px 6px;
+      vertical-align: middle;
+    }
+
+    .td-time  {
+      font-size: 10px;
+      color: #374151;
+      font-weight: 700;
+      width: 14%;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .td-cap   {
+      text-align: center;
+      color: #64748b;
+      width: 10%;
+    }
+    .td-booked{
+      text-align: center;
+      color: #1d4ed8;
+      font-weight: 700;
+      width: 10%;
+    }
+    .td-free  {
+      text-align: center;
+      width: 14%;
+    }
+    .td-names {
+      color: #374151;
+      font-size: 9px;
+      line-height: 1.35;
+      width: 52%;
+    }
+
+    /* Цвет свободных мест */
+    .free-ok   { color: #059669; font-weight: 700; }
+    .free-low  { color: #d97706; font-weight: 700; }
+    .free-none { color: #dc2626; font-weight: 700; }
+
+    /* Прогресс-бар */
+    .bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      margin-top: 1px;
+    }
+    .bar-bg {
+      flex: 1;
+      height: 3px;
+      background: #e2e8f0;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 2px;
+    }
+
+    /* Бейдж заполнено */
+    .full-badge {
+      display: inline-block;
+      background: #fee2e2;
+      color: #dc2626;
+      font-size: 7px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 1px 3px;
+      border-radius: 3px;
+      margin-left: 3px;
+      letter-spacing: 0.3px;
+      vertical-align: middle;
+    }
+
+    /* ── Подвал ────────────────────────────────────────────── */
+    .footer {
+      margin-top: 10px;
+      font-size: 9px;
+      color: #9ca3af;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 6px;
+    }
+
+    /* ── Пустое состояние ──────────────────────────────────── */
+    .empty-state {
+      color: #64748b;
+      text-align: center;
+      padding: 30px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 2px dashed #e2e8f0;
+      grid-column: 1 / -1;
+    }
+
+    /* ── МЕДИА: Печать ─────────────────────────────────────── */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 6mm;
+      }
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+      }
+      .controls,
+      .print-warning {
+        display: none !important;
+      }
+      .page {
+        margin: 0;
+        padding: 4mm;
+        max-width: none;
+        width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+        min-height: auto;
+      }
+      .header {
+        margin-bottom: 6px;
+        padding-bottom: 4px;
+      }
+      .stats-row {
+        margin-bottom: 6px;
+      }
+      /* Force flex layout for printing */
+      .three-columns {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 8px !important;
+      }
+      .col {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+      }
+      .dir-table {
+        margin-bottom: 6px;
+      }
+      .dir-caption {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      thead {
+        display: table-header-group;
+      }
+      tbody {
+        display: table-row-group;
+      }
+      tr {
+        page-break-inside: avoid;
+      }
+    }
+
+    /* ── Мобильная адаптация ───────────────────────────────── */
+    @media screen and (max-width: 900px) {
+      .three-columns {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Панель управления (скрывается при печати) -->
+  <div class="controls">
+    <label for="print-date">📅 День:</label>
+    <select id="print-date" style="padding: 6px 10px; font-size: 13px; min-width: 160px; border-radius: 6px; border: 1px solid #d1d5db;">
+      {% for d in schedule_dates %}
+      <option value="{{ d.isoformat() }}" {% if d == target_date %}selected{% endif %}>
+        {{ d.strftime('%d.%m.%Y') }} ({{ ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'][d.weekday()] }})
+      </option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary" onclick="loadDate()">🔄 Загрузить</button>
+    <button class="btn btn-success" onclick="window.print()">🖨 Печатать</button>
+    <a class="btn-back" href="/admin">&larr; Назад в панель</a>
+  </div>
+
+  <!-- Предупреждение (скрывается при печати) -->
+  <div class="print-warning" id="print-warning">
+    <span style="font-size: 18px;">⚠️</span>
+    <div>
+      <strong>Важно:</strong> Для корректной печати выберите <strong>альбомную ориентацию (Landscape)</strong> в настройках печати.<br>
+      <span style="font-size: 11px; opacity: 0.8;">Chrome → Настройки печати → Ориентация: Альбомная</span>
+    </div>
+  </div>
+
+  <!-- Шапка -->
+  <div class="header">
+    <div class="header-left">
+      <h1>HatiApp — Расписание смен</h1>
+      <p>Распечатано для вывешивания</p>
+    </div>
+    <div class="header-right">
+      <div class="date-big">{{ target_date.strftime('%d.%m.%Y') }}</div>
+      <div class="weekday">{{ weekday }}</div>
+    </div>
+  </div>
+
+  <!-- Статистика -->
+  <div class="stats-row">
+    <div class="stat-item {% if total_free == 0 %}stat-full{% endif %}">
+      <strong>{{ total_slots }}</strong> слотов
+    </div>
+    <div class="stat-item">
+      <strong>{{ total_booked }}</strong> записей
+    </div>
+    <div class="stat-item {% if total_free == 0 %}stat-full{% endif %}">
+      <strong>{{ total_free }}</strong> свободно
+    </div>
+    <div class="stat-item">
+      <strong>{{ dir_count }}</strong> направлений
+    </div>
+  </div>
+
+  {% if not columns or not (columns[0] or columns[1] or columns[2]) %}
+
+  <div class="empty-state">
+    <div style="font-size: 36px; margin-bottom: 8px;">📭</div>
+    <h3 style="font-size: 14px; color: #374151; margin-bottom: 4px;">На эту дату слотов не найдено</h3>
+    <p style="font-size: 12px;">Выберите другой день или загрузите расписание</p>
+  </div>
+
+  {% else %}
+
+  <!-- ТРИ СТОЛБИКА — направления целиком, не разрываются -->
+  <div class="three-columns">
+    {% for col in columns %}
+    <div class="col">
+      {% for direction in col %}
+      <table class="dir-table">
+        <caption class="dir-caption">{{ direction.name }}</caption>
+        <thead>
+          <tr>
+            <th class="text-center">Время</th>
+            <th class="text-center">Мест</th>
+            <th class="text-center">Зап</th>
+            <th class="text-center">Своб</th>
+            <th>Волонтёры</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in direction.rows %}
+          <tr>
+            <td class="td-time">{{ row.time }}</td>
+            <td class="td-cap">{{ row.capacity }}</td>
+            <td class="td-booked">{{ row.booked }}</td>
+            <td class="td-free">
+              {% if row.free == 0 %}
+                <span class="free-none">0</span>
+              {% elif row.free <= 3 %}
+                <span class="free-low">{{ row.free }}</span>
+              {% else %}
+                <span class="free-ok">{{ row.free }}</span>
+              {% endif %}
+              <div class="bar-wrap">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:{{ row.pct }}%; background:{{ '#dc2626' if row.pct == 100 else ('#d97706' if row.pct >= 70 else '#059669') }};"></div>
+                </div>
+              </div>
+            </td>
+            <td class="td-names">
+              {% if row.names %}
+                {{ row.names }}
+                {% if row.pct == 100 %}
+                  <span class="full-badge">FULL</span>
+                {% endif %}
+              {% else %}
+                <span style="color:#cbd5e1">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% endif %}
+
+  <div class="footer">
+    HatiApp · Система управления волонтёрскими сменами · {{ target_date.strftime('%d.%m.%Y') }}
+  </div>
+
+</div>
+
+<script>
+function loadDate() {
+  const date = document.getElementById('print-date').value;
+  if (date) {
+    window.location.href = '/admin/print?day=' + date;
+  }
+}
+</script>
+</body>
+</html>

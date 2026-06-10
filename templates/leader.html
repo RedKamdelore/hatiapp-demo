@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Мои направления{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h1 class="text-xl font-bold text-gray-800">Мои направления</h1>
+  <p class="text-xs text-gray-400 mt-0.5">Панель руководителя</p>
+</div>
+
+{% if not directions %}
+<div class="text-center text-gray-400 py-16 bg-white rounded-2xl border border-gray-200">
+  <div class="text-4xl mb-3">⚠️</div>
+  <p>Администратор ещё не назначил вас руководителем направления.</p>
+</div>
+
+{% else %}
+{% for direction in directions %}
+<div class="mb-6">
+  <h2 class="text-lg font-semibold text-gray-800 mb-3">{{ direction.name }}</h2>
+  
+  {% set days = days_by_dir[direction.id] %}
+  {% if days %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {% for day in days %}
+    {% set pct = (day.booked / day.total * 100) | int if day.total > 0 else 0 %}
+    <a href="/leader/day/{{ day.date.isoformat() }}"
+       class="bg-white rounded-2xl border border-gray-200 p-4 hover:shadow-md transition group">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <div class="font-semibold text-gray-800 group-hover:text-indigo-600 transition">
+            {{ day.date.strftime('%d.%m.%Y') }}
+          </div>
+          <div class="text-xs text-gray-400 mt-0.5">
+            {{ ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'][day.date.weekday()] }}
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="text-sm font-medium {% if pct >= 100 %}text-green-600{% elif pct >= 70 %}text-yellow-500{% else %}text-gray-500{% endif %}">
+            {{ day.booked }}/{{ day.total }}
+          </div>
+          <div class="text-xs text-gray-400">мест занято</div>
+        </div>
+      </div>
+      <div class="w-full bg-gray-100 rounded-full h-1.5">
+        <div class="h-1.5 rounded-full {% if pct >= 100 %}bg-green-400{% elif pct >= 70 %}bg-yellow-400{% else %}bg-indigo-400{% endif %}"
+          style="width:{{ pct }}%"></div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center text-gray-400 py-8 bg-white rounded-2xl border border-gray-200">
+    <div class="text-3xl mb-2">📭</div>
+    <p class="text-sm">Слотов в расписании нет</p>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

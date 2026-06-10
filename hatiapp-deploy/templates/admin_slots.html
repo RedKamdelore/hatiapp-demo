@@ -1,0 +1,1100 @@
+{% extends "base.html" %}
+{% block title %}Редактор смен{% endblock %}
+
+{% block content %}
+<style>
+  /* ── Keyframe анимации ──────────────────────────────────────────────── */
+  @keyframes fadeSlideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes popIn {
+    0%   { opacity: 0; transform: scale(0.88); }
+    65%  { transform: scale(1.03); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes rowIn {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes rowOut {
+    from { opacity: 1; transform: translateX(0)   max-height: 80px; }
+    to   { opacity: 0; transform: translateX(16px); max-height: 0; }
+  }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%,60% { transform: translateX(-5px); }
+    40%,80% { transform: translateX(5px); }
+  }
+  @keyframes flashGreen {
+    0%   { background: #dcfce7; }
+    100% { background: transparent; }
+  }
+  @keyframes flashRed {
+    0%   { background: #fee2e2; }
+    100% { background: transparent; }
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.94); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+  @keyframes toastOut {
+    from { opacity: 1; transform: translateY(0)    scale(1); }
+    to   { opacity: 0; transform: translateY(-12px) scale(0.94); }
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes numPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+  }
+
+  /* ── Аккордеон (grid-trick — работает без JS-измерений высоты) ──────── */
+  .dir-body-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.32s cubic-bezier(.4,0,.2,1),
+                opacity            0.28s ease;
+    opacity: 0;
+  }
+  .dir-body-wrap.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .dir-body-inner { overflow: hidden; }
+
+  /* ── Стрелка аккордеона ─────────────────────────────────────────────── */
+  .dir-arrow {
+    transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+    display: inline-block;
+  }
+  .dir-open .dir-arrow { transform: rotate(180deg); }
+
+  /* ── Строка слота ───────────────────────────────────────────────────── */
+  .slot-row {
+    transition: background 0.2s, opacity 0.2s;
+  }
+  .slot-row.new-row  { animation: rowIn    0.3s ease-out both; }
+  .slot-row.removing { animation: rowOut   0.25s ease-in  both; }
+  .slot-row.flash-ok { animation: flashGreen 0.9s ease both; }
+  .slot-row.flash-err{ animation: flashRed   0.9s ease both; }
+  .slot-row.shake    { animation: shake      0.4s ease; }
+
+  /* ── Инлайн-редактор вместимости ────────────────────────────────────── */
+  .cap-view   { transition: opacity 0.15s; }
+  .cap-edit   { display: none; }
+  .editing .cap-view { display: none; }
+  .editing .cap-edit { display: flex; animation: fadeIn 0.15s ease; }
+
+  /* ── Форма добавления слота ─────────────────────────────────────────── */
+  .add-form-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.28s cubic-bezier(.4,0,.2,1),
+                opacity            0.22s ease;
+    opacity: 0;
+  }
+  .add-form-wrap.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .add-form-inner { overflow: hidden; }
+
+  /* ── Число вместимости при изменении ────────────────────────────────── */
+  .cap-num.pop { animation: numPop 0.3s ease; }
+
+  /* ── Toast ──────────────────────────────────────────────────────────── */
+  #toast-area {
+    position: fixed; bottom: 80px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999; display: flex; flex-direction: column;
+    align-items: center; gap: 8px; pointer-events: none;
+  }
+  .toast {
+    padding: 10px 20px; border-radius: 12px;
+    font-size: 13px; font-weight: 500;
+    animation: toastIn 0.28s ease-out both;
+    pointer-events: none; white-space: nowrap;
+    box-shadow: 0 4px 20px rgba(0,0,0,.15);
+  }
+  .toast.ok  { background: #166534; color: #fff; }
+  .toast.err { background: #991b1b; color: #fff; }
+  .toast.out { animation: toastOut 0.24s ease-in both; }
+
+  /* ── Загрузочный спиннер ────────────────────────────────────────────── */
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+
+  /* ── Входная анимация карточек направлений ───────────────────────────── */
+  .dir-card { animation: fadeSlideDown 0.3s ease-out both; }
+  {% for item in dir_data %}
+  .dir-card:nth-child({{ loop.index + 1 }}) { animation-delay: {{ (loop.index0 * 0.05) | round(2) }}s; }
+  {% endfor %}
+
+  /* ── Удаление карточки направления ─────────────────────────────────────── */
+  @keyframes cardOut {
+    from { opacity: 1; transform: scale(1);    max-height: 300px; }
+    to   { opacity: 0; transform: scale(0.96); max-height: 0;     padding: 0; margin: 0; }
+  }
+  .dir-card.removing-dir {
+    animation: cardOut 0.35s ease-in both;
+    overflow: hidden;
+  }
+
+  /* ── Панель добавления направления ─────────────────────────────────────── */
+  .new-dir-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.28s cubic-bezier(.4,0,.2,1),
+                opacity            0.22s ease;
+    opacity: 0;
+  }
+  .new-dir-wrap.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .new-dir-inner { overflow: hidden; }
+
+  /* ── Кнопка ─/+ ─────────────────────────────────────────────────────── */
+  .cap-btn {
+    transition: background 0.15s, transform 0.1s;
+  }
+  .cap-btn:active { transform: scale(0.88); }
+  .cap-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Тёмная тема */
+  .dark .toast.ok  { background: #14532d; }
+  .dark .toast.err { background: #7f1d1d; }
+  .dark .dir-card { background: #1e1e1e; border-color: #2e2e2e; }
+  .dark .dir-card .text-gray-800 { color: #e8e8e8 !important; }
+  .dark .dir-card .text-gray-400 { color: #777777 !important; }
+  .dark .dir-card .text-gray-500 { color: #bbbbbb !important; }
+  .dark .dir-card .border-gray-100 { border-color: #2e2e2e !important; }
+  .dark .dir-card .border-gray-200 { border-color: #2e2e2e !important; }
+  .dark .dir-card .bg-gray-50 { background: #1a1a1a !important; }
+  .dark .dir-card .bg-gray-50\/50 { background: #1a1a1a80 !important; }
+  .dark .dir-card .bg-gray-100 { background: #252525 !important; }
+  .dark .dir-card .hover\:bg-gray-50:hover { background: #1a1a1a !important; }
+  .dark .dir-card .hover\:bg-gray-100:hover { background: #252525 !important; }
+  .dark .dir-card .hover\:text-red-500:hover { color: #f87171 !important; }
+  .dark .dir-card .hover\:text-indigo-500:hover { color: #818cf8 !important; }
+  .dark .dir-card input,
+  .dark .dir-card select,
+  .dark .dir-card textarea { background: #272727 !important; border-color: #3e3e3e !important; color: #e8e8e8 !important; }
+  .dark .dir-card input::placeholder,
+  .dark .dir-card textarea::placeholder { color: #666666 !important; }
+  .dark .dir-card .bg-indigo-50 { background: #1e1b4b !important; }
+  .dark .dir-card .bg-indigo-50\/50 { background: #1e1b4b80 !important; }
+  .dark .dir-card .border-indigo-100 { border-color: #312e81 !important; }
+  .dark .dir-card .text-indigo-600 { color: #818cf8 !important; }
+  .dark .dir-card .text-indigo-500 { color: #818cf8 !important; }
+  .dark .dir-card .bg-green-100 { background: #064e3b !important; }
+  .dark .dir-card .text-green-600 { color: #4ade80 !important; }
+  .dark .dir-card .bg-yellow-100 { background: #713f12 !important; }
+  .dark .dir-card .text-yellow-600 { color: #fbbf24 !important; }
+  .dark .dir-card .bg-red-100 { background: #450a0a !important; }
+  .dark .dir-card .text-red-600 { color: #f87171 !important; }
+  .dark .new-dir-wrap .bg-indigo-50 { background: #1e1b4b !important; border-color: #312e81 !important; }
+  .dark .new-dir-wrap .text-indigo-600 { color: #818cf8 !important; }
+  .dark .slot-row input { background: #272727 !important; color: #e8e8e8 !important; }
+</style>
+
+<!-- ── Шапка ──────────────────────────────────────────────────────────────── -->
+<div class="flex items-center justify-between mb-4" style="animation: fadeSlideDown .3s ease-out both">
+  <div class="flex items-center gap-3">
+    <a href="/admin"
+       class="text-gray-400 hover:text-indigo-600 transition p-1 rounded-lg hover:bg-indigo-50"
+       title="Назад в админку">
+      <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/>
+      </svg>
+    </a>
+    <div>
+      <h1 class="text-xl font-bold text-gray-800">Редактор смен</h1>
+      <p class="text-xs text-gray-400 mt-0.5" id="header-stats">
+        <span id="dir-count">{{ dir_data | length }}</span> направлений ·
+        {{ dir_data | sum(attribute='slot_count') }} слотов
+      </p>
+    </div>
+  </div>
+  <button onclick="toggleNewDirForm()"
+    id="new-dir-btn"
+    class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium
+           hover:bg-indigo-700 transition shadow-sm hover:shadow-md active:scale-95"
+    style="transition: all .18s ease">
+    <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+    </svg>
+    Направление
+  </button>
+</div>
+
+<!-- ── Форма добавления направления ──────────────────────────────────────── -->
+<div class="new-dir-wrap mb-3" id="new-dir-wrap" style="animation: fadeSlideDown .3s ease-out .05s both">
+  <div class="new-dir-inner">
+    <div class="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 mb-1" style="animation: popIn .25s ease-out">
+      <p class="text-xs font-semibold text-indigo-600 mb-3">Новое направление</p>
+      <div class="flex flex-wrap gap-2 items-end">
+        <div class="flex flex-col gap-1 flex-1 min-w-[160px]">
+          <label class="text-xs text-gray-500">Название</label>
+          <input type="text" id="new-dir-name" placeholder="Например: Кухня"
+            maxlength="120"
+            onkeydown="if(event.key==='Enter')addDirection();if(event.key==='Escape')toggleNewDirForm()"
+            class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+        </div>
+        <button onclick="addDirection()" id="new-dir-submit"
+          class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition flex items-center gap-1.5">
+          <span>Создать</span>
+        </button>
+        <button onclick="toggleNewDirForm()"
+          class="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition">
+          Отмена
+        </button>
+      </div>
+      <p class="text-xs text-red-500 mt-2 hidden" id="new-dir-err"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast область ─────────────────────────────────────────────────────── -->
+<div id="toast-area"></div>
+
+<!-- ── Пусто ─────────────────────────────────────────────────────────────── -->
+{% if not dir_data %}
+<div class="text-center text-gray-400 py-20" style="animation: fadeIn .4s ease">
+  <div class="text-5xl mb-3">📭</div>
+  <p>Нет направлений. Сначала загрузите расписание.</p>
+  <a href="/admin/import-schedule"
+     class="mt-4 inline-block text-sm text-indigo-600 hover:underline">
+    Загрузить расписание →
+  </a>
+</div>
+{% endif %}
+
+<!-- ── Список направлений ─────────────────────────────────────────────────── -->
+<div class="flex flex-col gap-3">
+{% for item in dir_data %}
+{% set d = item.direction %}
+<div class="dir-card bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm" id="dir-{{ d.id }}">
+
+  <!-- Заголовок аккордеона -->
+  <div class="flex items-center border-b border-gray-100/80 hover:bg-gray-50 transition group"
+       id="dir-toggle-{{ d.id }}">
+    <button onclick="toggleDir({{ d.id }})"
+      class="flex-1 px-5 py-4 flex items-center justify-between text-left min-w-0">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="dir-arrow text-gray-400">
+          <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+          </svg>
+        </span>
+        <span class="font-semibold text-gray-800 truncate">{{ d.name }}</span>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+        <span class="text-xs text-gray-400">{{ item.slot_count }} смен</span>
+        <span class="text-xs px-2 py-0.5 rounded-full
+          {% if item.total_booked == item.total_capacity and item.total_capacity > 0 %}
+            bg-red-100 text-red-600
+          {% elif item.total_booked > item.total_capacity * 0.7 %}
+            bg-yellow-100 text-yellow-600
+          {% else %}
+            bg-green-100 text-green-600
+          {% endif %}">
+          {{ item.total_booked }}/{{ item.total_capacity }}
+        </span>
+      </div>
+    </button>
+    <!-- Кнопка редактировать направление -->
+    <button onclick="editDirection({{ d.id }})"
+      class="flex-shrink-0 w-9 h-9 mr-1 rounded-lg text-gray-200 hover:text-indigo-500 hover:bg-indigo-50
+             flex items-center justify-center transition opacity-0 group-hover:opacity-100"
+      title="Редактировать направление">
+      <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
+      </svg>
+    </button>
+    <!-- Кнопка удалить направление -->
+    <button onclick="deleteDirection({{ d.id }}, '{{ d.name | replace("'", "\\'") }}')"
+      class="flex-shrink-0 w-9 h-9 mr-3 rounded-lg text-gray-200 hover:text-red-500 hover:bg-red-50
+             flex items-center justify-center transition opacity-0 group-hover:opacity-100"
+      title="Удалить направление">
+      <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Тело аккордеона -->
+  <div class="dir-body-wrap border-t-0" id="dir-wrap-{{ d.id }}">
+    <div class="dir-body-inner">
+
+      <!-- Редактирование направления -->
+      <div id="dir-edit-{{ d.id }}" class="hidden px-5 py-4 bg-indigo-50/50 border-b border-gray-100">
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Название</label>
+            <input type="text" id="dir-name-{{ d.id }}" value="{{ d.name }}"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-500 mb-1">Описание</label>
+            <textarea id="dir-desc-{{ d.id }}" rows="2"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white resize-none"
+              placeholder="Описание направления...">{{ d.description or '' }}</textarea>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="saveDirection({{ d.id }})"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-4 py-2 rounded-lg transition">Сохранить</button>
+            <button onclick="cancelEditDirection({{ d.id }})"
+              class="bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs px-4 py-2 rounded-lg transition">Отмена</button>
+          </div>
+          <p id="dir-edit-err-{{ d.id }}" class="text-xs text-red-500 mt-1 hidden"></p>
+        </div>
+      </div>
+
+      <!-- Описание (если есть) -->
+      {% if d.description %}
+      <div class="px-5 py-2 bg-gray-50/50 border-b border-gray-100" id="dir-desc-view-{{ d.id }}">
+        <p class="text-xs text-gray-500 italic">{{ d.description }}</p>
+      </div>
+      {% endif %}
+
+      {% if item.by_date %}
+        {% for slot_date, slot_infos in item.by_date %}
+        <!-- Группа по дате -->
+        <div class="date-group" id="dg-{{ d.id }}-{{ slot_date.isoformat() }}">
+          <div class="px-5 py-1.5 bg-gray-50 border-t border-b border-gray-100 flex items-center justify-between">
+            <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              {{ slot_date.strftime('%d %B %Y') }}
+            </span>
+            <button onclick="openAddForm({{ d.id }}, '{{ slot_date.isoformat() }}')"
+              class="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition">
+              + слот
+            </button>
+          </div>
+
+          <!-- Строки слотов -->
+          <div class="slot-list" id="sl-{{ d.id }}-{{ slot_date.isoformat() }}">
+          {% for info in slot_infos %}
+          {% set s = info.slot %}
+          <div class="slot-row flex items-center gap-3 px-5 py-3 border-b border-gray-50 hover:bg-gray-50/60 transition"
+               id="row-{{ s.id }}">
+
+            <!-- Время -->
+            <div class="text-sm font-bold text-indigo-600 w-12 flex-shrink-0">
+              {{ s.time.strftime('%H:%M') }}
+            </div>
+
+            <!-- Инлайн-редактор вместимости -->
+            <div class="flex-1 flex items-center gap-2">
+
+              <!-- Режим просмотра -->
+              <div class="cap-view flex items-center gap-2">
+                <button onclick="adjustCap({{ s.id }}, -1)"
+                  class="cap-btn w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold text-base"
+                  {% if info.booked >= s.capacity %}disabled{% endif %}>−</button>
+                <button onclick="startEdit({{ s.id }})"
+                  class="cap-num text-sm font-semibold text-gray-800 min-w-[28px] text-center px-1 hover:bg-indigo-50 hover:text-indigo-600 rounded transition"
+                  title="Нажмите для ручного ввода">
+                  {{ s.capacity }}
+                </button>
+                <button onclick="adjustCap({{ s.id }}, 1)"
+                  class="cap-btn w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold text-base">+</button>
+                <span class="text-xs text-gray-400 ml-1">мест</span>
+              </div>
+
+              <!-- Режим ввода (скрыт по умолчанию) -->
+              <div class="cap-edit items-center gap-2">
+                <input id="inp-{{ s.id }}" type="number" min="0" max="9999"
+                  value="{{ s.capacity }}"
+                  onkeydown="if(event.key==='Enter')saveEdit({{ s.id }});if(event.key==='Escape')cancelEdit({{ s.id }})"
+                  class="w-20 border border-indigo-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                <button onclick="saveEdit({{ s.id }})"
+                  class="text-xs px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition">✓</button>
+                <button onclick="cancelEdit({{ s.id }})"
+                  class="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition">✕</button>
+              </div>
+
+            </div>
+
+            <!-- Записано -->
+            <div class="flex-shrink-0 text-xs text-center min-w-[52px]">
+              <span class="booked-cnt-{{ s.id }}
+                {% if info.booked == 0 %}text-gray-300
+                {% elif info.booked >= s.capacity %}text-red-500 font-semibold
+                {% elif info.booked >= s.capacity * 0.7 %}text-yellow-500
+                {% else %}text-green-600{% endif %}">
+                {{ info.booked }} зап.
+              </span>
+            </div>
+
+            <!-- Кнопка удалить -->
+            <button onclick="deleteSlot({{ s.id }})"
+              class="flex-shrink-0 w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition"
+              title="Удалить слот (только если нет записей)">
+              <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916"/>
+              </svg>
+            </button>
+          </div>
+          {% endfor %}
+          </div><!-- /slot-list -->
+        </div><!-- /date-group -->
+        {% endfor %}
+
+      {% else %}
+      <div class="px-5 py-6 text-center text-gray-400 text-sm border-t border-gray-100">
+        Нет слотов для этого направления
+      </div>
+      {% endif %}
+
+      <!-- Кнопка «+ Добавить слот» -->
+      <div class="px-5 py-3 border-t border-gray-100">
+        <button onclick="openAddForm({{ d.id }}, null)"
+          class="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-gray-200
+                 text-sm text-gray-400 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/60
+                 transition-all duration-200">
+          <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+          </svg>
+          Добавить слот
+        </button>
+
+        <!-- Форма добавления (раскрывается) -->
+        <div class="add-form-wrap" id="add-wrap-{{ d.id }}">
+          <div class="add-form-inner">
+            <div class="mt-3 p-4 bg-indigo-50 rounded-xl border border-indigo-100" style="animation: popIn .25s ease-out">
+              <p class="text-xs font-semibold text-indigo-600 mb-3">Новый слот — {{ d.name }}</p>
+              <div class="flex flex-wrap gap-2 items-end">
+                <div class="flex flex-col gap-1">
+                  <label class="text-xs text-gray-500">Дата</label>
+                  <input type="date" id="add-date-{{ d.id }}"
+                    class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="text-xs text-gray-500">Время</label>
+                  <input type="time" id="add-time-{{ d.id }}"
+                    class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="text-xs text-gray-500">Мест</label>
+                  <input type="number" min="1" max="9999" placeholder="10"
+                    id="add-cap-{{ d.id }}"
+                    class="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+                </div>
+                <button onclick="addSlot({{ d.id }})"
+                  id="add-btn-{{ d.id }}"
+                  class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition flex items-center gap-1.5">
+                  <span>Добавить</span>
+                </button>
+                <button onclick="closeAddForm({{ d.id }})"
+                  class="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition">
+                  Отмена
+                </button>
+              </div>
+              <p class="text-xs text-red-500 mt-2 hidden" id="add-err-{{ d.id }}"></p>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /add area -->
+
+    </div><!-- /dir-body-inner -->
+  </div><!-- /dir-body-wrap -->
+</div><!-- /dir-card -->
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── Аккордеон ───────────────────────────────────────────────────────────────
+function toggleDir(id) {
+  const wrap   = document.getElementById('dir-wrap-' + id);
+  const header = document.getElementById('dir-toggle-' + id);
+  const isOpen = wrap.classList.contains('open');
+  wrap.classList.toggle('open', !isOpen);
+  header.classList.toggle('dir-open', !isOpen);
+}
+
+// Открываем первое направление по умолчанию
+(function() {
+  const first = document.querySelector('.dir-body-wrap');
+  if (first) {
+    first.classList.add('open');
+    const card = first.closest('.dir-card');
+    const id   = card.id.replace('dir-', '');
+    const hdr  = document.getElementById('dir-toggle-' + id);
+    if (hdr) hdr.classList.add('dir-open');
+  }
+})();
+
+// ── Форма добавления направления ─────────────────────────────────────────────
+function toggleNewDirForm() {
+  const wrap = document.getElementById('new-dir-wrap');
+  const isOpen = wrap.classList.contains('open');
+  wrap.classList.toggle('open', !isOpen);
+  if (!isOpen) {
+    setTimeout(() => {
+      const inp = document.getElementById('new-dir-name');
+      if (inp) inp.focus();
+    }, 120);
+  }
+}
+
+async function addDirection() {
+  const inp    = document.getElementById('new-dir-name');
+  const errEl  = document.getElementById('new-dir-err');
+  const btn    = document.getElementById('new-dir-submit');
+  const name   = inp.value.trim();
+
+  if (!name) {
+    errEl.textContent = 'Введите название направления';
+    errEl.classList.remove('hidden');
+    inp.classList.add('shake');
+    setTimeout(() => inp.classList.remove('shake'), 400);
+    return;
+  }
+
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled  = true;
+
+  const data = await api('/admin/directions/add', { name });
+
+  btn.innerHTML = '<span>Создать</span>';
+  btn.disabled  = false;
+
+  if (!data.ok) {
+    errEl.textContent = data.error;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  errEl.classList.add('hidden');
+  inp.value = '';
+  toggleNewDirForm();
+  insertDirectionCard(data.direction);
+  // Обновляем счётчик в шапке
+  const cnt = document.getElementById('dir-count');
+  if (cnt) cnt.textContent = parseInt(cnt.textContent || '0') + 1;
+  showToast('Направление «' + data.direction.name + '» создано', 'ok');
+}
+
+// Вставляем новую карточку направления в конец списка
+function insertDirectionCard(dir) {
+  const list = document.querySelector('.flex.flex-col.gap-3');
+  if (!list) return;
+
+  const card = document.createElement('div');
+  card.className = 'dir-card bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm';
+  card.id = 'dir-' + dir.id;
+  card.innerHTML = `
+    <div class="flex items-center border-b border-gray-100/80 hover:bg-gray-50 transition group"
+         id="dir-toggle-${dir.id}">
+      <button onclick="toggleDir(${dir.id})"
+        class="flex-1 px-5 py-4 flex items-center justify-between text-left min-w-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="dir-arrow text-gray-400">
+            <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/>
+            </svg>
+          </span>
+          <span class="font-semibold text-gray-800 truncate">${dir.name}</span>
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+          <span class="text-xs text-gray-400">0 смен</span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-600">0/0</span>
+        </div>
+      </button>
+      <button onclick="deleteDirection(${dir.id}, '${dir.name.replace(/'/g, "\\'")}')"
+        class="flex-shrink-0 w-9 h-9 mr-3 rounded-lg text-gray-200 hover:text-red-500 hover:bg-red-50
+               flex items-center justify-center transition opacity-0 group-hover:opacity-100"
+        title="Удалить направление">
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916"/>
+        </svg>
+      </button>
+    </div>
+    <div class="dir-body-wrap border-t-0 open" id="dir-wrap-${dir.id}">
+      <div class="dir-body-inner">
+        <div class="px-5 py-6 text-center text-gray-400 text-sm border-t border-gray-100">
+          Нет слотов для этого направления
+        </div>
+        <div class="px-5 py-3 border-t border-gray-100">
+          <button onclick="openAddForm(${dir.id}, null)"
+            class="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-gray-200
+                   text-sm text-gray-400 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/60 transition-all duration-200">
+            <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+            </svg>
+            Добавить слот
+          </button>
+          <div class="add-form-wrap" id="add-wrap-${dir.id}">
+            <div class="add-form-inner">
+              <div class="mt-3 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                <p class="text-xs font-semibold text-indigo-600 mb-3">Новый слот — ${dir.name}</p>
+                <div class="flex flex-wrap gap-2 items-end">
+                  <div class="flex flex-col gap-1">
+                    <label class="text-xs text-gray-500">Дата</label>
+                    <input type="date" id="add-date-${dir.id}"
+                      class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="text-xs text-gray-500">Время</label>
+                    <input type="time" id="add-time-${dir.id}"
+                      class="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <label class="text-xs text-gray-500">Мест</label>
+                    <input type="number" min="1" max="9999" placeholder="10" id="add-cap-${dir.id}"
+                      class="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+                  </div>
+                  <button onclick="addSlot(${dir.id})" id="add-btn-${dir.id}"
+                    class="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition flex items-center gap-1.5">
+                    <span>Добавить</span>
+                  </button>
+                  <button onclick="closeAddForm(${dir.id})"
+                    class="px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-sm text-gray-500 hover:bg-gray-50 transition">
+                    Отмена
+                  </button>
+                </div>
+                <p class="text-xs text-red-500 mt-2 hidden" id="add-err-${dir.id}"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  list.appendChild(card);
+  // Открываем новую карточку
+  const hdr = document.getElementById('dir-toggle-' + dir.id);
+  if (hdr) hdr.classList.add('dir-open');
+}
+
+// ── Редактирование направления ────────────────────────────────────────────────
+function editDirection(dirId) {
+  const editForm = document.getElementById('dir-edit-' + dirId);
+  if (editForm) {
+    editForm.classList.remove('hidden');
+    // Сохраняем оригинальные значения
+    const nameInput = document.getElementById('dir-name-' + dirId);
+    const descInput = document.getElementById('dir-desc-' + dirId);
+    if (nameInput && !nameInput.dataset.original) nameInput.dataset.original = nameInput.value;
+    if (descInput && !descInput.dataset.original) descInput.dataset.original = descInput.value;
+    // Открываем аккордеон если закрыт
+    const wrap = document.getElementById('dir-wrap-' + dirId);
+    const hdr = document.getElementById('dir-toggle-' + dirId);
+    if (wrap && !wrap.classList.contains('open')) {
+      wrap.classList.add('open');
+      if (hdr) hdr.classList.add('dir-open');
+    }
+  }
+}
+
+function cancelEditDirection(dirId) {
+  const editForm = document.getElementById('dir-edit-' + dirId);
+  if (editForm) {
+    editForm.classList.add('hidden');
+    // Сбрасываем значения
+    const nameInput = document.getElementById('dir-name-' + dirId);
+    const descInput = document.getElementById('dir-desc-' + dirId);
+    const errEl = document.getElementById('dir-edit-err-' + dirId);
+    if (nameInput) nameInput.value = nameInput.dataset.original || nameInput.value;
+    if (descInput) descInput.value = descInput.dataset.original || descInput.value;
+    if (errEl) errEl.classList.add('hidden');
+  }
+}
+
+async function saveDirection(dirId) {
+  const nameInput = document.getElementById('dir-name-' + dirId);
+  const descInput = document.getElementById('dir-desc-' + dirId);
+  const errEl = document.getElementById('dir-edit-err-' + dirId);
+  
+  if (!nameInput) return;
+  
+  const name = nameInput.value.trim();
+  const description = descInput ? descInput.value.trim() : '';
+  
+  if (!name) {
+    if (errEl) {
+      errEl.textContent = 'Название не может быть пустым';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+  
+  const data = await api('/admin/directions/' + dirId + '/update', { name, description });
+  
+  if (!data.ok) {
+    if (errEl) {
+      errEl.textContent = data.error || 'Ошибка сохранения';
+      errEl.classList.remove('hidden');
+    }
+    return;
+  }
+  
+  // Обновляем отображение
+  const nameSpan = document.querySelector('#dir-' + dirId + ' .font-semibold.text-gray-800.truncate');
+  if (nameSpan) nameSpan.textContent = data.direction.name;
+  
+  // Обновляем описание
+  const descView = document.getElementById('dir-desc-view-' + dirId);
+  if (description) {
+    if (descView) {
+      descView.querySelector('p').textContent = description;
+    } else {
+      // Создаём блок описания
+      const inner = document.querySelector('#dir-wrap-' + dirId + ' .dir-body-inner');
+      if (inner) {
+        const newDesc = document.createElement('div');
+        newDesc.id = 'dir-desc-view-' + dirId;
+        newDesc.className = 'px-5 py-2 bg-gray-50/50 border-b border-gray-100';
+        newDesc.innerHTML = '<p class="text-xs text-gray-500 italic">' + escapeHtml(description) + '</p>';
+        inner.insertBefore(newDesc, inner.children[1]);
+      }
+    }
+  } else if (descView) {
+    descView.remove();
+  }
+  
+  // Скрываем форму
+  const editForm = document.getElementById('dir-edit-' + dirId);
+  if (editForm) editForm.classList.add('hidden');
+  
+  showToast('Направление обновлено', 'ok');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ── Удаление направления ──────────────────────────────────────────────────────
+async function deleteDirection(dirId, dirName) {
+  if (!confirm(`Удалить направление «${dirName}»?\n\nВсе смены этого направления тоже будут удалены. Это действие необратимо.`)) return;
+
+  const data = await api('/admin/directions/' + dirId + '/delete', {});
+
+  if (!data.ok) {
+    showToast(data.error, 'err');
+    return;
+  }
+
+  const card = document.getElementById('dir-' + dirId);
+  if (card) {
+    card.classList.add('removing-dir');
+    setTimeout(() => {
+      card.remove();
+      // Обновляем счётчик в шапке
+      const cnt = document.getElementById('dir-count');
+      if (cnt) cnt.textContent = Math.max(0, parseInt(cnt.textContent || '1') - 1);
+
+      const slotMsg = data.slot_count > 0
+        ? ` и ${data.slot_count} смен`
+        : '';
+      showToast(`Направление «${dirName}»${slotMsg} удалено`, 'ok');
+    }, 370);
+  }
+}
+
+// ── Toast уведомления ────────────────────────────────────────────────────────
+function showToast(msg, type) {
+  const area = document.getElementById('toast-area');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type === 'ok' ? 'ok' : 'err');
+  el.textContent = (type === 'ok' ? '✓ ' : '✕ ') + msg;
+  area.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 280);
+  }, 2400);
+}
+
+// ── Вспомогательная функция API ──────────────────────────────────────────────
+async function api(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+// ── Flash-подсветка строки ───────────────────────────────────────────────────
+function flashRow(id, type) {
+  const row = document.getElementById('row-' + id);
+  if (!row) return;
+  row.classList.remove('flash-ok', 'flash-err', 'shake');
+  void row.offsetWidth;  // reflow
+  if (type === 'ok')  row.classList.add('flash-ok');
+  if (type === 'err') { row.classList.add('flash-err'); row.classList.add('shake'); }
+  setTimeout(() => row.classList.remove('flash-ok', 'flash-err', 'shake'), 950);
+}
+
+// ── Кнопки ±1 ───────────────────────────────────────────────────────────────
+async function adjustCap(slotId, delta) {
+  const numEl = document.querySelector('#row-' + slotId + ' .cap-num');
+  const current = parseInt(numEl.textContent.trim());
+  const next = current + delta;
+  if (next < 0) return;
+
+  const data = await api('/admin/slots/' + slotId + '/capacity', { capacity: next });
+  if (data.ok) {
+    numEl.textContent = data.capacity;
+    numEl.classList.remove('pop');
+    void numEl.offsetWidth;
+    numEl.classList.add('pop');
+    setTimeout(() => numEl.classList.remove('pop'), 350);
+    updateBookedBadge(slotId, data.booked, data.capacity);
+    flashRow(slotId, 'ok');
+    showToast('Вместимость: ' + data.capacity, 'ok');
+  } else {
+    flashRow(slotId, 'err');
+    showToast(data.error, 'err');
+  }
+}
+
+// ── Инлайн-редактор ──────────────────────────────────────────────────────────
+function startEdit(slotId) {
+  const row = document.getElementById('row-' + slotId);
+  row.classList.add('editing');
+  const inp = document.getElementById('inp-' + slotId);
+  inp.focus();
+  inp.select();
+}
+
+function cancelEdit(slotId) {
+  document.getElementById('row-' + slotId).classList.remove('editing');
+}
+
+async function saveEdit(slotId) {
+  const inp = document.getElementById('inp-' + slotId);
+  const val = parseInt(inp.value);
+  if (isNaN(val) || val < 0) {
+    inp.classList.add('shake');
+    setTimeout(() => inp.classList.remove('shake'), 400);
+    return;
+  }
+  const data = await api('/admin/slots/' + slotId + '/capacity', { capacity: val });
+  if (data.ok) {
+    const numEl = document.querySelector('#row-' + slotId + ' .cap-num');
+    numEl.textContent = data.capacity;
+    numEl.classList.remove('pop');
+    void numEl.offsetWidth;
+    numEl.classList.add('pop');
+    cancelEdit(slotId);
+    updateBookedBadge(slotId, data.booked, data.capacity);
+    flashRow(slotId, 'ok');
+    showToast('Сохранено: ' + data.capacity + ' мест', 'ok');
+  } else {
+    flashRow(slotId, 'err');
+    showToast(data.error, 'err');
+  }
+}
+
+// ── Бейдж «N зап.» ──────────────────────────────────────────────────────────
+function updateBookedBadge(slotId, booked, capacity) {
+  const el = document.querySelector('.booked-cnt-' + slotId);
+  if (!el) return;
+  el.textContent = booked + ' зап.';
+  el.className = 'booked-cnt-' + slotId + ' ' + (
+    booked === 0          ? 'text-gray-300' :
+    booked >= capacity    ? 'text-red-500 font-semibold' :
+    booked >= capacity*0.7? 'text-yellow-500' : 'text-green-600'
+  );
+}
+
+// ── Удаление слота ───────────────────────────────────────────────────────────
+async function deleteSlot(slotId) {
+  const row = document.getElementById('row-' + slotId);
+  if (!confirm('Удалить этот слот?')) return;
+
+  const data = await api('/admin/slots/' + slotId + '/delete', {});
+  if (data.ok) {
+    row.classList.add('removing');
+    setTimeout(() => {
+      row.remove();
+      showToast('Слот удалён', 'ok');
+    }, 270);
+  } else {
+    flashRow(slotId, 'err');
+    showToast(data.error, 'err');
+  }
+}
+
+// ── Форма добавления слота ───────────────────────────────────────────────────
+function openAddForm(dirId, prefillDate) {
+  closeAllAddForms();
+  const wrap = document.getElementById('add-wrap-' + dirId);
+  wrap.classList.add('open');
+
+  // Прокручиваем к форме
+  setTimeout(() => wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80);
+
+  // Предзаполнение даты если передана
+  if (prefillDate) {
+    const inp = document.getElementById('add-date-' + dirId);
+    if (inp) inp.value = prefillDate;
+  }
+
+  // Открываем аккордеон если закрыт
+  const bodyWrap = document.getElementById('dir-wrap-' + dirId);
+  if (!bodyWrap.classList.contains('open')) {
+    bodyWrap.classList.add('open');
+    const hdr = document.getElementById('dir-toggle-' + dirId);
+    if (hdr) hdr.classList.add('dir-open');
+  }
+}
+
+function closeAddForm(dirId) {
+  document.getElementById('add-wrap-' + dirId).classList.remove('open');
+  document.getElementById('add-err-' + dirId).classList.add('hidden');
+}
+
+function closeAllAddForms() {
+  document.querySelectorAll('.add-form-wrap').forEach(el => el.classList.remove('open'));
+}
+
+async function addSlot(dirId) {
+  const dateVal = document.getElementById('add-date-' + dirId).value;
+  const timeVal = document.getElementById('add-time-' + dirId).value;
+  const capVal  = document.getElementById('add-cap-' + dirId).value;
+  const errEl   = document.getElementById('add-err-' + dirId);
+  const btn     = document.getElementById('add-btn-' + dirId);
+
+  if (!dateVal || !timeVal || !capVal) {
+    errEl.textContent = 'Заполните все поля';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  // Спиннер
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled = true;
+
+  const data = await api('/admin/slots/add', {
+    direction_id: dirId,
+    date:     dateVal,
+    time:     timeVal,
+    capacity: parseInt(capVal),
+  });
+
+  btn.innerHTML = '<span>Добавить</span>';
+  btn.disabled = false;
+
+  if (!data.ok) {
+    errEl.textContent = data.error;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  errEl.classList.add('hidden');
+  closeAddForm(dirId);
+  insertSlotRow(dirId, data.slot);
+  showToast('Слот добавлен: ' + data.slot.time + ' · ' + data.slot.capacity + ' мест', 'ok');
+}
+
+// ── Вставка новой строки слота без перезагрузки страницы ─────────────────────
+function insertSlotRow(dirId, slot) {
+  const dateKey = slot.date;                  // "YYYY-MM-DD"
+  const dateGroupId = 'dg-' + dirId + '-' + dateKey;
+  const slotListId  = 'sl-' + dirId + '-' + dateKey;
+
+  let slotList = document.getElementById(slotListId);
+
+  // Если такой группы дат ещё нет — создаём
+  if (!slotList) {
+    const dirInner = document.querySelector('#dir-' + dirId + ' .dir-body-inner');
+    // Найти место вставки группы по дате (до кнопки добавления)
+    const addArea = dirInner.querySelector('.px-5.py-3.border-t');
+
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'date-group';
+    groupDiv.id = dateGroupId;
+    groupDiv.innerHTML = `
+      <div class="px-5 py-1.5 bg-gray-50 border-t border-b border-gray-100 flex items-center justify-between">
+        <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">${slot.date_fmt}</span>
+        <button onclick="openAddForm(${dirId}, '${dateKey}')"
+          class="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition">+ слот</button>
+      </div>
+      <div class="slot-list" id="${slotListId}"></div>
+    `;
+    dirInner.insertBefore(groupDiv, addArea);
+    slotList = document.getElementById(slotListId);
+  }
+
+  // Строка слота
+  const row = document.createElement('div');
+  row.className = 'slot-row new-row flex items-center gap-3 px-5 py-3 border-b border-gray-50 hover:bg-gray-50/60 transition';
+  row.id = 'row-' + slot.id;
+  row.innerHTML = `
+    <div class="text-sm font-bold text-indigo-600 w-12 flex-shrink-0">${slot.time}</div>
+    <div class="flex-1 flex items-center gap-2">
+      <div class="cap-view flex items-center gap-2">
+        <button onclick="adjustCap(${slot.id}, -1)"
+          class="cap-btn w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold text-base" disabled>−</button>
+        <button onclick="startEdit(${slot.id})"
+          class="cap-num text-sm font-semibold text-gray-800 min-w-[28px] text-center px-1 hover:bg-indigo-50 hover:text-indigo-600 rounded transition">
+          ${slot.capacity}
+        </button>
+        <button onclick="adjustCap(${slot.id}, 1)"
+          class="cap-btn w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold text-base">+</button>
+        <span class="text-xs text-gray-400 ml-1">мест</span>
+      </div>
+      <div class="cap-edit items-center gap-2">
+        <input id="inp-${slot.id}" type="number" min="0" max="9999" value="${slot.capacity}"
+          onkeydown="if(event.key==='Enter')saveEdit(${slot.id});if(event.key==='Escape')cancelEdit(${slot.id})"
+          class="w-20 border border-indigo-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+        <button onclick="saveEdit(${slot.id})" class="text-xs px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition">✓</button>
+        <button onclick="cancelEdit(${slot.id})" class="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition">✕</button>
+      </div>
+    </div>
+    <div class="flex-shrink-0 text-xs text-center min-w-[52px]">
+      <span class="booked-cnt-${slot.id} text-gray-300">0 зап.</span>
+    </div>
+    <button onclick="deleteSlot(${slot.id})"
+      class="flex-shrink-0 w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition">
+      <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916"/>
+      </svg>
+    </button>
+  `;
+
+  // Вставляем в нужное место по времени
+  const existing = slotList.querySelectorAll('.slot-row');
+  let inserted = false;
+  for (const existRow of existing) {
+    const existTime = existRow.querySelector('.text-indigo-600').textContent.trim();
+    if (slot.time < existTime) {
+      slotList.insertBefore(row, existRow);
+      inserted = true;
+      break;
+    }
+  }
+  if (!inserted) slotList.appendChild(row);
+}
+</script>
+{% endblock %}

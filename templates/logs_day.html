@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}{{ target_date.strftime('%d.%m.%Y') }} — записи{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex items-center gap-3">
+  <a href="/logs" class="text-gray-400 hover:text-gray-600 transition">← Назад</a>
+  <div>
+    <h1 class="text-xl font-bold text-gray-800">
+      {{ target_date.strftime('%d.%m.%Y') }}
+      <span class="text-gray-400 font-normal text-base ml-1">
+        ({{ ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'][target_date.weekday()] }})
+      </span>
+    </h1>
+    <p class="text-xs text-gray-400 mt-0.5">Управление записями волонтёров</p>
+  </div>
+</div>
+
+{% if msg %}
+<div class="rounded-xl px-4 py-3 text-sm mb-4 border
+  {% if status == 'ok' %}bg-green-50 border-green-200 text-green-700
+  {% else %}bg-red-50 border-red-200 text-red-700{% endif %}">
+  {% if status == 'ok' %}✅{% else %}⚠️{% endif %} {{ msg }}
+</div>
+{% endif %}
+
+<!-- Волонтёры без записи -->
+<div class="bg-white rounded-2xl border border-gray-200 p-5 mb-5">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-semibold text-gray-700">Не записались</h2>
+    <span class="text-xs {% if not_booked %}bg-red-100 text-red-600{% else %}bg-green-100 text-green-700{% endif %} px-3 py-1 rounded-full">
+      {% if not_booked %}{{ not_booked | length }} чел.{% else %}✓ Все записаны{% endif %}
+    </span>
+  </div>
+
+  <!-- Поиск + сортировка -->
+  <div class="flex flex-col sm:flex-row gap-3 mb-4">
+    <div class="relative flex-1">
+      <input type="text" id="volunteer-search" placeholder="🔍 Поиск по позывному..."
+        class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"/>
+    </div>
+    <select id="volunteer-sort"
+      class="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white sm:w-auto w-full">
+      <option value="name_asc">Имя А → Я</option>
+      <option value="name_desc">Имя Я → А</option>
+      <option value="booked_asc">Смены: 0 → 2</option>
+      <option value="booked_desc">Смены: 2 → 0</option>
+    </select>
+  </div>
+
+  {% if not_booked %}
+  <div class="flex flex-col gap-3" id="not-booked-list">
+    {% for item in not_booked %}
+    {% set v = item.user %}
+    <div class="flex flex-col sm:flex-row gap-3 bg-gray-50 rounded-xl p-3"
+         data-search="{{ (v.full_name or '') | lower }} {{ v.username | lower }}"
+         data-name="{{ (v.full_name or v.username) | lower }}"
+         data-booked="{{ item.booked }}">
+      <!-- Аватар + инфо — на мобильном сверху, на sm слева -->
+      <div class="flex items-center gap-3 flex-1 min-w-0">
+        {% if v.avatar %}
+          <img src="/static/avatars/{{ v.avatar }}" class="w-10 h-10 rounded-full object-cover flex-shrink-0"/>
+        {% else %}
+          <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold flex-shrink-0">
+            {{ (v.full_name or v.username)[0].upper() }}
+          </div>
+        {% endif %}
+
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-800 truncate">{{ v.full_name or v.username }}</p>
+          <div class="flex items-center gap-1.5 mt-0.5 overflow-hidden">
+            <span class="text-xs text-gray-400 truncate max-w-[90px] flex-shrink-0">@{{ v.username }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap
+              {% if item.booked == 0 %}bg-red-100 text-red-600
+              {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+              {{ item.booked }}/2 смены
+            </span>
+            <form method="post" action="/logs/user/{{ v.id }}/toggle-check-in" class="inline flex-shrink-0">
+              {% if not v.checked_in %}
+                <button class="text-xs bg-gray-100 text-gray-500 border border-gray-300 px-3 py-1 rounded-lg hover:bg-gray-200 transition whitespace-nowrap">
+                  ✓ Прибыл
+                </button>
+              {% else %}
+                <button class="text-xs bg-green-500 text-white border border-green-500 px-3 py-1 rounded-lg hover:bg-green-600 transition whitespace-nowrap">
+                  ✓ Прибыл
+                </button>
+              {% endif %}
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Форма записи — на мобильном столбиком, на sm строкой -->
+      <form method="post" action="/logs/book" class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+        <input type="hidden" name="user_id" value="{{ v.id }}"/>
+        <input type="hidden" name="redirect_date" value="{{ target_date.isoformat() }}"/>
+        <input type="hidden" name="slot_id" class="slot-id-input" value=""/>
+
+        <!-- Направление -->
+        <select class="dir-select text-xs border border-gray-200 rounded-xl px-2 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full sm:w-auto sm:max-w-[160px]"
+                onchange="updateTimes(this)">
+          <option value="">— направление —</option>
+          {% for dir in available_directions %}
+            <option value="{{ dir.id }}">{{ dir.name }}</option>
+          {% endfor %}
+        </select>
+
+        <!-- Время -->
+        <select class="time-select text-xs border border-gray-200 rounded-xl px-2 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full sm:w-auto sm:max-w-[120px]"
+                onchange="updateSlotId(this)" disabled>
+          <option value="">— время —</option>
+        </select>
+
+        <button type="submit"
+          class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl transition whitespace-nowrap w-full sm:w-auto">
+          Записать
+        </button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <p class="text-sm text-green-600 text-center py-4">✅ Все волонтёры записались на этот день!</p>
+  {% endif %}
+</div>
+
+<!-- Все слоты этого дня с записавшимися -->
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+  <div class="p-4 border-b border-gray-100">
+    <h2 class="font-semibold text-gray-700">Записи на {{ target_date.strftime('%d.%m') }}</h2>
+  </div>
+
+  {% if slot_data %}
+  <div class="flex flex-col divide-y divide-gray-100">
+    {% for item in slot_data %}
+    {% set s = item.slot %}
+    <div class="p-4">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <span class="font-medium text-indigo-600">{{ s.time.strftime('%H:%M') }}</span>
+          <span class="text-gray-700 ml-2">{{ s.direction.name }}</span>
+        </div>
+        <span class="text-xs text-gray-400">{{ item.booked }}/{{ s.capacity }}</span>
+      </div>
+
+      <!-- Прогресс -->
+      {% set pct = (item.booked / s.capacity * 100) | int if s.capacity else 0 %}
+      <div class="w-full bg-gray-100 rounded-full h-1.5 mb-3">
+        <div class="h-1.5 rounded-full {% if pct >= 100 %}bg-red-400{% elif pct >= 70 %}bg-yellow-400{% else %}bg-green-400{% endif %}"
+          style="width:{{ pct }}%"></div>
+      </div>
+
+      <!-- Записавшиеся -->
+      {% if s.bookings %}
+      <div class="flex flex-wrap gap-2">
+        {% for booking in s.bookings %}
+        {% set u = booking.user %}
+        <div class="flex items-center gap-2 bg-indigo-50 rounded-xl px-3 py-1.5">
+          {% if u.avatar %}
+            <img src="/static/avatars/{{ u.avatar }}" class="w-6 h-6 rounded-full object-cover"/>
+          {% else %}
+            <div class="w-6 h-6 rounded-full bg-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-700">
+              {{ (u.full_name or u.username)[0].upper() }}
+            </div>
+          {% endif %}
+          <span class="text-xs text-indigo-700">{{ u.full_name or u.username }}</span>
+          <!-- Кнопка снять -->
+          <form method="post" action="/logs/cancel/{{ booking.id }}">
+            <input type="hidden" name="redirect_date" value="{{ target_date.isoformat() }}"/>
+            <button class="text-indigo-300 hover:text-red-500 transition text-xs ml-1">✕</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-xs text-gray-300">Никто не записан</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center text-gray-400 py-8">
+    <p class="text-sm">Слотов на этот день нет</p>
+  </div>
+  {% endif %}
+</div>
+
+{% block extra_scripts %}
+<script>
+// Поиск по позывному
+const searchInput = document.getElementById('volunteer-search');
+if (searchInput) {
+  searchInput.addEventListener('input', function() {
+    const query = this.value.toLowerCase().trim();
+    const cards = document.querySelectorAll('#not-booked-list > [data-search]');
+    cards.forEach(function(card) {
+      const searchText = card.getAttribute('data-search');
+      if (searchText.includes(query)) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  });
+}
+
+// Сортировка
+const sortSelect = document.getElementById('volunteer-sort');
+if (sortSelect) {
+  sortSelect.addEventListener('change', function() {
+    const list = document.getElementById('not-booked-list');
+    const cards = Array.from(list.querySelectorAll(':scope > [data-name]'));
+    const sortType = this.value;
+
+    cards.sort(function(a, b) {
+      if (sortType === 'name_asc') {
+        return a.getAttribute('data-name').localeCompare(b.getAttribute('data-name'));
+      } else if (sortType === 'name_desc') {
+        return b.getAttribute('data-name').localeCompare(a.getAttribute('data-name'));
+      } else if (sortType === 'booked_asc') {
+        return parseInt(a.getAttribute('data-booked')) - parseInt(b.getAttribute('data-booked'));
+      } else if (sortType === 'booked_desc') {
+        return parseInt(b.getAttribute('data-booked')) - parseInt(a.getAttribute('data-booked'));
+      }
+      return 0;
+    });
+
+    cards.forEach(function(card) {
+      list.appendChild(card);
+    });
+  });
+}
+
+const SLOTS = [
+  {% for item in slot_data %}
+  {
+    id: {{ item.slot.id }},
+    dir_id: {{ item.slot.direction_id }},
+    time: "{{ item.slot.time.strftime('%H:%M') }}",
+    free: {{ item.free }},
+    booked: {{ item.booked }},
+    capacity: {{ item.slot.capacity }},
+  },
+  {% endfor %}
+];
+
+function updateTimes(dirSelect) {
+  const dirId = parseInt(dirSelect.value);
+  const form = dirSelect.closest('form');
+  const timeSelect = form.querySelector('.time-select');
+  const slotInput = form.querySelector('.slot-id-input');
+
+  timeSelect.innerHTML = '<option value="">— время —</option>';
+  slotInput.value = '';
+
+  if (!dirId) {
+    timeSelect.disabled = true;
+    return;
+  }
+
+  const matching = SLOTS.filter(s => s.dir_id === dirId);
+  matching.forEach(function(s) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.disabled = s.free === 0;
+    opt.textContent = s.time
+      + ' (' + s.booked + '/' + s.capacity + ')'
+      + (s.free === 0 ? ' — нет мест' : ' — ' + s.free + ' св.');
+    timeSelect.appendChild(opt);
+  });
+
+  timeSelect.disabled = matching.length === 0;
+}
+
+function updateSlotId(timeSelect) {
+  const form = timeSelect.closest('form');
+  const slotInput = form.querySelector('.slot-id-input');
+  slotInput.value = timeSelect.value;
+  slotInput.name = 'slot_id';
+}
+
+document.querySelectorAll('form[action="/logs/book"]').forEach(function(form) {
+  form.addEventListener('submit', function(e) {
+    const slotInput = form.querySelector('.slot-id-input');
+    if (!slotInput.value) {
+      e.preventDefault();
+      alert('Выберите направление и время');
+    }
+  });
+});
+</script>
+{% endblock %}
+{% endblock %}

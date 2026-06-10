@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+app.db
+*.pem
+.env
+cert.pem
+key.pem
+hatiapp-deploy.zip
+cloudflared.exe

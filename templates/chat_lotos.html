@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Чаты{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h1 class="text-xl font-bold text-gray-800">Диалоги</h1>
+  <p class="text-xs text-gray-400 mt-0.5">Все обращения к поддержке</p>
+</div>
+
+{% if chats %}
+<div class="flex flex-col gap-2" id="chats-container">
+  {% for item in chats %}
+  {% set u = item.user %}
+  {% set last = item.last_msg %}
+  <a href="/chat/with/{{ u.id }}"
+     class="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 hover:shadow-md transition">
+
+    <!-- Аватар + бейдж непрочитанных -->
+    <div style="position:relative;flex-shrink:0">
+      {% if u.avatar %}
+        <img src="/static/avatars/{{ u.avatar }}" class="w-11 h-11 rounded-full object-cover"/>
+      {% else %}
+        <div class="w-11 h-11 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold">
+          {{ (u.full_name or u.username)[0].upper() }}
+        </div>
+      {% endif %}
+      <!-- Бейдж — обновляется через SSE -->
+      <span id="chat-unread-{{ u.id }}"
+        style="display:none;position:absolute;top:-4px;right:-4px;
+               background:#ef4444;color:#fff;border-radius:50%;
+               width:18px;height:18px;font-size:10px;font-weight:700;
+               align-items:center;justify-content:center;
+               border:2px solid #fff;">
+      </span>
+    </div>
+
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-gray-800 text-sm">{{ u.full_name or u.username }}</span>
+        {% if last %}
+        <span class="text-xs text-gray-400 flex-shrink-0">{{ last.created_at.strftime('%H:%M') }}</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center justify-between mt-0.5">
+        {% if last %}
+        <p class="text-xs text-gray-400 truncate">
+          {% if last.sender_id == user.id %}
+            <span class="text-gray-300">Вы: </span>
+          {% elif last.sender.role == 'lotos' %}
+            <span class="text-pink-400">{{ last.sender.full_name or last.sender.username }} 🌸: </span>
+          {% elif last.sender.role == 'admin' %}
+            <span class="text-purple-400">{{ last.sender.full_name or last.sender.username }} 👑: </span>
+          {% else %}
+            <span class="text-gray-400">{{ last.sender.full_name or last.sender.username }}: </span>
+          {% endif %}
+          {{ last.text }}
+        </p>
+        {% else %}
+        <p class="text-xs text-gray-300">Нет сообщений</p>
+        {% endif %}
+        <span class="text-xs px-2 py-0.5 rounded-full ml-2 flex-shrink-0
+          {% if u.role == 'volunteer' %}bg-gray-100 text-gray-500
+          {% elif u.role == 'leader' %}bg-blue-100 text-blue-600
+          {% else %}bg-gray-100 text-gray-500{% endif %}">
+          {{ u.role }}
+        </span>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="text-center text-gray-400 py-16" id="no-chats-msg">
+  <div class="text-4xl mb-3">💬</div>
+  <p class="text-sm">Пока никто не написал</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  let ws = null;
+  let reconnectTimer = null;
+  let isConnecting = false;
+  const ME = {{ user.id }};
+
+  function connect() {
+    if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
+    isConnecting = true;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const token = document.cookie.split('; ').find(row => row.startsWith('session_token='));
+    const tokenValue = token ? token.split('=')[1] : '';
+    const wsUrl = protocol + '//' + window.location.host + '/ws/chat' + (tokenValue ? '?token=' + encodeURIComponent(tokenValue) : '');
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = function() {
+      isConnecting = false;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    };
+
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      if (data.action !== 'new_message') return;
+      if (data.sender_id === ME) return; // свои сообщения игнорируем
+
+      // Определяем, с кем диалог
+      // Если отправитель — лотос, диалог с получателем (волонтёром)
+      // Если отправитель — волонтёр, диалог с отправителем
+      const isSenderLotos = data.sender_role === 'lotos';
+      const dialogUserId = isSenderLotos ? data.receiver_id : data.sender_id;
+      const dialogUserName = isSenderLotos ? '' : escapeHtml(data.sender_name); // для волонтёра берём из payload
+
+      const existingCard = document.querySelector('a[href="/chat/with/' + dialogUserId + '"');
+
+      if (existingCard) {
+        // Обновляем существующую карточку
+        const timeEl = existingCard.querySelector('.text-xs.text-gray-400.flex-shrink-0');
+        if (timeEl) {
+          const d = new Date(data.created_at);
+          timeEl.textContent = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        }
+        const previewEl = existingCard.querySelector('p.text-xs.truncate');
+        if (previewEl) {
+          const prefix = isSenderLotos ? '<span class="text-pink-400">' + escapeHtml(data.sender_name) + ' 🌸: </span>' : '<span class="text-gray-400">' + escapeHtml(data.sender_name) + ': </span>';
+          previewEl.innerHTML = prefix + escapeHtml(data.text);
+        }
+        // Перемещаем наверх
+        const container = existingCard.parentNode;
+        container.insertBefore(existingCard, container.firstChild);
+      } else {
+        // Создаём новую карточку
+        const container = document.getElementById('chats-container') || document.querySelector('.flex.flex-col.gap-2');
+        if (!container) {
+          window.location.reload();
+          return;
+        }
+
+        // Скрываем "Пока никто не написал"
+        const noChats = document.getElementById('no-chats-msg');
+        if (noChats) noChats.style.display = 'none';
+
+        const displayName = escapeHtml(isSenderLotos ? (data.receiver_name || 'Пользователь') : data.sender_name);
+        const displayRole = isSenderLotos ? (data.receiver_role || 'volunteer') : (data.sender_role || 'volunteer');
+        const initial = displayName.charAt(0).toUpperCase();
+        const roleClass = displayRole === 'volunteer' ? 'bg-gray-100 text-gray-500' : (displayRole === 'leader' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500');
+        const time = new Date(data.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+        const card = document.createElement('a');
+        card.href = '/chat/with/' + dialogUserId;
+        card.className = 'bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 hover:shadow-md transition';
+        card.innerHTML =
+          '<div style="position:relative;flex-shrink:0">' +
+            '<div class="w-11 h-11 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold">' + initial + '</div>' +
+            '<span id="chat-unread-' + dialogUserId + '" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;align-items:center;justify-content:center;border:2px solid #fff;"></span>' +
+          '</div>' +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="flex items-center justify-between">' +
+              '<span class="font-medium text-gray-800 text-sm">' + displayName + '</span>' +
+              '<span class="text-xs text-gray-400 flex-shrink-0">' + time + '</span>' +
+            '</div>' +
+            '<div class="flex items-center justify-between mt-0.5">' +
+              '<p class="text-xs text-gray-400 truncate">' +
+                (isSenderLotos ? '<span class="text-pink-400">' + escapeHtml(data.sender_name) + ' 🌸: </span>' : '<span class="text-gray-400">' + escapeHtml(data.sender_name) + ': </span>') +
+                escapeHtml(data.text) +
+              '</p>' +
+              '<span class="text-xs px-2 py-0.5 rounded-full ml-2 flex-shrink-0 ' + roleClass + '">' + displayRole + '</span>' +
+            '</div>' +
+          '</div>';
+
+        container.insertBefore(card, container.firstChild);
+      }
+
+      // Показываем бейдж непрочитанных
+      const badge = document.getElementById('chat-unread-' + dialogUserId);
+      if (badge) {
+        badge.style.display = 'flex';
+        badge.textContent = (parseInt(badge.textContent) || 0) + 1;
+      }
+    };
+
+    ws.onclose = function() {
+      isConnecting = false;
+      reconnectTimer = setTimeout(connect, 3000);
+    };
+    ws.onerror = function() { isConnecting = false; };
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  connect();
+})();
+</script>
+{% endblock %}
