@@ -1,61 +1,139 @@
 {% extends "base.html" %}
-{% block title %}Чат{% endblock %}
+{% block title %}{% if view == 'dialog' %}{{ target.full_name or target.username }}{% else %}Диалоги{% endif %}{% endblock %}
 
 {% block content %}
-<div class="mb-4 flex items-center gap-3">
-  {% if is_lotos_view is defined and is_lotos_view %}
-  <a href="/chat" class="text-gray-400 hover:text-gray-600">← Назад</a>
-  {% endif %}
-  <div class="flex-1">
-    <h1 class="text-xl font-bold text-gray-800">
-      {% if is_lotos_view is defined and is_lotos_view %}{{ lotos.full_name or lotos.username }}
-      {% else %}Чат с поддержкой{% endif %}
-    </h1>
-    <p class="text-xs text-gray-400">
-      {% if is_lotos_view is defined and is_lotos_view %}
-        💬 Общий диалог с волонтёром
-      {% elif lotos_list and lotos_list | length > 0 %}
-        🌸 
-        {% for l in lotos_list %}
-          {{ l.full_name or l.username }}{% if not loop.last %}, {% endif %}
-        {% endfor %}
-        {{ 'на связи' if lotos_list | length == 1 else 'на связи' }}
-      {% elif lotos %}
-        🌸 {{ lotos.full_name or lotos.username }} на связи
-      {% else %}
-        Поддержка пока недоступна
-      {% endif %}
-    </p>
-  </div>
-  {% if lotos_list and lotos_list | length > 0 %}
-    <div class="flex -space-x-2">
-      {% for l in lotos_list %}
-        {% if l.avatar %}
-          <img src="/static/avatars/{{ l.avatar }}" class="w-9 h-9 rounded-full object-cover border-2 border-white" title="{{ l.full_name or l.username }}"/>
-        {% else %}
-          <div class="w-9 h-9 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 font-bold text-sm border-2 border-white" title="{{ l.full_name or l.username }}">
-            {{ (l.full_name or l.username)[0].upper() }}
-          </div>
-        {% endif %}
-      {% endfor %}
-    </div>
-  {% elif lotos %}
-    {% if lotos.avatar %}
-      <img src="/static/avatars/{{ lotos.avatar }}" class="w-9 h-9 rounded-full object-cover"/>
-    {% else %}
-      <div class="w-9 h-9 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 font-bold text-sm">
-        {{ (lotos.full_name or lotos.username)[0].upper() }}
-      </div>
-    {% endif %}
-  {% endif %}
+{% if view == 'list' %}
+<!-- СПИСОК ДИАЛОГОВ -->
+<div class="mb-5">
+  <h1 class="text-xl font-bold text-gray-800">Диалоги</h1>
+  <p class="text-xs text-gray-400 mt-0.5">Ваши переписки</p>
 </div>
 
-{% if not lotos and not lotos_list %}
-<div class="text-center text-gray-400 py-16">
-  <div class="text-4xl mb-3">🌸</div>
-  <p>Лотос пока не назначен.</p>
+{% if dialogs %}
+<div class="flex flex-col gap-2" id="dialogs-container">
+  {% for item in dialogs %}
+  {% set u = item.user %}
+  {% set last = item.last_msg %}
+  {% set unread = item.unread %}
+  <a href="/chat/with/{{ u.id }}"
+     class="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3 hover:shadow-md transition"
+     data-dialog-id="{{ u.id }}">
+
+    <!-- Аватар + бейдж -->
+    <div style="position:relative;flex-shrink:0">
+      {% if u.avatar %}
+        <img src="/static/avatars/{{ u.avatar }}" class="w-11 h-11 rounded-full object-cover"/>
+      {% else %}
+        <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold
+          {% if u.role == 'lotos' %}bg-pink-100 text-pink-600
+          {% elif u.role == 'admin' %}bg-purple-100 text-purple-600
+          {% else %}bg-indigo-100 text-indigo-600{% endif %}">
+          {{ (u.full_name or u.username)[0].upper() }}
+        </div>
+      {% endif %}
+      {% if unread > 0 %}
+      <span class="dialog-badge"
+        style="position:absolute;top:-4px;right:-4px;
+               background:#ef4444;color:#fff;border-radius:50%;
+               min-width:18px;height:18px;font-size:10px;font-weight:700;
+               display:flex;align-items:center;justify-content:center;
+               border:2px solid #fff;padding:0 4px;">
+        {{ unread }}
+      </span>
+      {% endif %}
+    </div>
+
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-gray-800 text-sm">{{ u.full_name or u.username }}
+          {% if u.role == 'lotos' %}<span class="text-pink-400">🌸</span>{% endif %}
+        </span>
+        {% if last %}
+        <span class="text-xs text-gray-400 flex-shrink-0 dialog-time">{{ last.created_at.strftime('%H:%M') }}</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center justify-between mt-0.5">
+        {% if last %}
+        <p class="text-xs text-gray-400 truncate dialog-preview">
+          {% if last.sender_id == user.id %}
+            <span class="text-gray-300">Вы: </span>
+          {% endif %}
+          {{ last.text }}
+        </p>
+        {% else %}
+        <p class="text-xs text-gray-300">Нет сообщений</p>
+        {% endif %}
+        <span class="text-xs px-2 py-0.5 rounded-full ml-2 flex-shrink-0
+          {% if u.role == 'volunteer' %}bg-gray-100 text-gray-500
+          {% elif u.role == 'leader' %}bg-blue-100 text-blue-600
+          {% elif u.role == 'lotos' %}bg-pink-100 text-pink-600
+          {% elif u.role == 'admin' %}bg-purple-100 text-purple-600
+          {% else %}bg-gray-100 text-gray-500{% endif %}">
+          {{ u.role }}
+        </span>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
 </div>
+
 {% else %}
+<div class="text-center text-gray-400 py-16" id="no-dialogs-msg">
+  <div class="text-4xl mb-3">💬</div>
+  <p class="text-sm">Пока нет диалогов</p>
+  <p class="text-xs mt-2">Нажмите + чтобы начать чат</p>
+</div>
+{% endif %}
+
+<!-- FAB -->
+<button onclick="openNewChat()"
+  class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition hover:scale-110 z-50">
+  +
+</button>
+
+<!-- Модалка -->
+<div id="new-chat-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-end sm:items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+    <div class="p-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="text-lg font-bold text-gray-800">Новый чат</h2>
+      <button onclick="closeNewChat()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    </div>
+    <div class="p-4">
+      <input type="text" id="search-user" placeholder="Поиск по позывному..."
+        class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        oninput="searchUsers(this.value)">
+    </div>
+    <div id="search-results" class="flex-1 overflow-y-auto px-4 pb-4">
+      <!-- Результаты поиска -->
+    </div>
+  </div>
+</div>
+
+{% else %}
+<!-- ДИАЛОГ -->
+<div class="mb-4 flex items-center gap-3">
+  <a href="/chat" class="text-gray-400 hover:text-gray-600">← Назад</a>
+  <div class="flex-1">
+    <h1 class="text-xl font-bold text-gray-800">
+      {{ target.full_name or target.username }}
+      {% if target.role == 'lotos' %}<span class="text-pink-400">🌸</span>{% endif %}
+    </h1>
+    <p class="text-xs text-gray-400">
+      {% if target.role == 'lotos' %}💬 Общий чат с поддержкой
+      {% else %}💬 Личная переписка{% endif %}
+    </p>
+  </div>
+  {% if target.avatar %}
+    <img src="/static/avatars/{{ target.avatar }}" class="w-9 h-9 rounded-full object-cover"/>
+  {% else %}
+    <div class="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm
+      {% if target.role == 'lotos' %}bg-pink-100 text-pink-600
+      {% elif target.role == 'admin' %}bg-purple-100 text-purple-600
+      {% else %}bg-indigo-100 text-indigo-600{% endif %}">
+      {{ (target.full_name or target.username)[0].upper() }}
+    </div>
+  {% endif %}
+</div>
 
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-3">
   <div id="chat-box" style="height:55vh; overflow-y:auto; padding: 12px; display:flex; flex-direction:column; gap:4px;">
@@ -64,7 +142,7 @@
 </div>
 
 <form id="chat-form" class="flex gap-2">
-  <input type="hidden" name="receiver_id" value="{{ lotos.id if lotos else (lotos_list[0].id if lotos_list else '') }}"/>
+  <input type="hidden" name="receiver_id" value="{{ target.id }}"/>
   <input type="text" name="text" id="chat-input" required
     placeholder="Написать сообщение..."
     autocomplete="off"
@@ -73,17 +151,18 @@
     class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-2xl text-sm transition">➤</button>
 </form>
 
+{% endif %}
+
 <script>
 const ME = {{ user.id }};
 const USER_ROLE = "{{ user.role }}";
-const WITH_ID = {% if is_lotos_view is defined and is_lotos_view %}{{ lotos.id }}{% else %}null{% endif %};
-const DELETE_ALLOWED = (USER_ROLE === 'lotos' || USER_ROLE === 'admin');
+const IS_LOTOS_CHAT = {% if view == 'dialog' and target.role == 'lotos' %}true{% else %}false{% endif %};
+const WITH_ID = {% if view == 'dialog' %}{{ target.id }}{% else %}null{% endif %};
 
 let lastIds = [];
 let lastMsgId = 0;
 let allMessages = [];
 
-// Звуковое уведомление (короткий beep)
 function playNotificationSound() {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -104,6 +183,8 @@ function playNotificationSound() {
 
 function renderMessages() {
   const box = document.getElementById('chat-box');
+  if (!box) return;
+  
   const messages = allMessages;
   const ids = messages.map(m => m.id + m.text + m.sender_id).join(',');
   if (ids === lastIds) return;
@@ -123,7 +204,6 @@ function renderMessages() {
     const wrap = document.createElement('div');
     wrap.style.cssText = 'display:flex;align-items:flex-end;gap:8px;' + (isMe ? 'justify-content:flex-end;' : '');
 
-    // Аватар (только не-я)
     if (!isMe) {
       const av = document.createElement('div');
       if (m.sender_avatar) {
@@ -139,7 +219,6 @@ function renderMessages() {
     const col = document.createElement('div');
     col.style.cssText = 'max-width:78%;display:flex;flex-direction:column;align-items:' + (isMe ? 'flex-end' : 'flex-start');
 
-    // Имя отправителя (для сообщений не от меня)
     if (!isMe) {
       const name = document.createElement('p');
       name.style.cssText = 'font-size:11px;color:#9ca3af;margin-bottom:2px;margin-left:4px';
@@ -152,15 +231,6 @@ function renderMessages() {
 
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:flex-end;gap:4px;' + (isMe ? 'flex-direction:row-reverse;' : '');
-
-    // Кнопка удаления
-    if (isMe || DELETE_ALLOWED) {
-      const del = document.createElement('form');
-      del.method = 'post';
-      del.action = '/chat/delete/' + m.id;
-      del.innerHTML = '<button style="color:#d1d5db;font-size:11px;padding:0 4px;background:none;border:none;cursor:pointer;" onmouseover="this.style.color=\'#ef4444\'" onmouseout="this.style.color=\'#d1d5db\'">✕</button>';
-      row.appendChild(del);
-    }
 
     const bubble = document.createElement('div');
     let bubbleStyle = 'padding:8px 12px;border-radius:18px;font-size:0.875rem;line-height:1.5;';
@@ -192,18 +262,76 @@ function renderMessages() {
   }
 }
 
-// ── WebSocket чат (real-time) ──────────────────────────────────────────────
+// ── Модалка нового чата ────────────────────────────────────────────────────
+function openNewChat() {
+  document.getElementById('new-chat-modal').classList.remove('hidden');
+  document.getElementById('search-user').focus();
+}
+
+function closeNewChat() {
+  document.getElementById('new-chat-modal').classList.add('hidden');
+}
+
+let searchTimeout = null;
+function searchUsers(query) {
+  if (searchTimeout) clearTimeout(searchTimeout);
+  const resultsEl = document.getElementById('search-results');
+  
+  if (!query || query.length < 2) {
+    resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Введите минимум 2 символа</p>';
+    return;
+  }
+  
+  resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Поиск...</p>';
+  
+  searchTimeout = setTimeout(function() {
+    fetch('/api/users/search?q=' + encodeURIComponent(query))
+      .then(function(r) { return r.json(); })
+      .then(function(users) {
+        if (users.length === 0) {
+          resultsEl.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">Ничего не найдено</p>';
+          return;
+        }
+        resultsEl.innerHTML = '';
+        users.forEach(function(u) {
+          const div = document.createElement('a');
+          div.href = '/chat/with/' + u.id;
+          div.className = 'flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl transition';
+          const initial = (u.full_name || u.username)[0].toUpperCase();
+          div.innerHTML = 
+            '<div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm flex-shrink-0">' + initial + '</div>' +
+            '<div class="flex-1 min-w-0">' +
+              '<p class="text-sm font-medium text-gray-800">' + (u.full_name || u.username) + '</p>' +
+              '<p class="text-xs text-gray-400">' + u.username + ' · ' + u.role + '</p>' +
+            '</div>';
+          resultsEl.appendChild(div);
+        });
+      })
+      .catch(function() {
+        resultsEl.innerHTML = '<p class="text-center text-red-400 text-sm py-4">Ошибка поиска</p>';
+      });
+  }, 300);
+}
+
+// Закрытие модалки по клику вне
+if (document.getElementById('new-chat-modal')) {
+  document.getElementById('new-chat-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeNewChat();
+  });
+}
+
+// ── WebSocket real-time ────────────────────────────────────────────────────
 (function() {
+  {% if view == 'dialog' %}
   let ws = null;
   let reconnectTimer = null;
   let isConnecting = false;
 
   function connect() {
-    if (isConnecting || ws && ws.readyState === WebSocket.OPEN) return;
+    if (isConnecting || (ws && ws.readyState === WebSocket.OPEN)) return;
     isConnecting = true;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Получаем token из cookie для передачи в WebSocket
     const token = document.cookie.split('; ').find(row => row.startsWith('session_token='));
     const tokenValue = token ? token.split('=')[1] : '';
     const wsUrl = protocol + '//' + window.location.host + '/ws/chat' + (tokenValue ? '?token=' + encodeURIComponent(tokenValue) : '');
@@ -212,32 +340,22 @@ function renderMessages() {
     ws.onopen = function() {
       isConnecting = false;
       console.log('WebSocket connected');
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     };
 
     ws.onmessage = function(event) {
       const data = JSON.parse(event.data);
       if (data.action === 'new_message') {
-        // Проверяем, относится ли сообщение к текущему диалогу
-        const receiverEl = document.querySelector('[name=receiver_id]');
-        const receiverId = receiverEl ? parseInt(receiverEl.value) : null;
         let isRelevant;
-        if (USER_ROLE === 'lotos') {
-          // Для лотоса: диалог с конкретным пользователем (volunteer/leader/admin)
-          // Показываем: сообщения от этого пользователя к любому лотосу,
-          // и сообщения от любого лотоса (включая себя) этому пользователю
-          const isFromUserToAnyLotos = (data.sender_id === receiverId && data.receiver_role === 'lotos');
-          const isFromAnyLotosToUser = (data.sender_role === 'lotos' && data.receiver_id === receiverId);
-          const isMyMessageToUser = (data.sender_id === ME && data.receiver_id === receiverId);
-          isRelevant = isFromUserToAnyLotos || isFromAnyLotosToUser || isMyMessageToUser;
+        if (IS_LOTOS_CHAT) {
+          // Для лотос-чата: сообщения от этого пользователя к любому лотосу, или от любого лотоса этому пользователю
+          const lotosCheck = data.sender_role === 'lotos' || data.receiver_role === 'lotos';
+          const involvesMe = data.sender_id === ME || data.receiver_id === ME;
+          isRelevant = lotosCheck && involvesMe;
         } else {
-          // Для волонтёра: обычная логика
-          isRelevant = (data.sender_id === ME && data.receiver_id === receiverId) ||
-                       (data.sender_id === receiverId && data.receiver_id === ME) ||
-                       (!WITH_ID && data.receiver_id === ME);
+          // Обычный диалог 1 на 1
+          isRelevant = (data.sender_id === ME && data.receiver_id === WITH_ID) ||
+                       (data.sender_id === WITH_ID && data.receiver_id === ME);
         }
 
         if (isRelevant) {
@@ -255,7 +373,6 @@ function renderMessages() {
 
           if (data.sender_id !== ME) {
             playNotificationSound();
-            // Отмечаем прочитанным
             fetch('/chat/read/' + data.sender_id, { method: 'POST' });
           }
         }
@@ -264,13 +381,9 @@ function renderMessages() {
 
     ws.onclose = function() {
       isConnecting = false;
-      console.log('WebSocket disconnected, reconnecting...');
       reconnectTimer = setTimeout(connect, 3000);
     };
-
-    ws.onerror = function() {
-      isConnecting = false;
-    };
+    ws.onerror = function() { isConnecting = false; };
   }
 
   function sendMessage(text, receiverId) {
@@ -283,10 +396,8 @@ function renderMessages() {
     }
   }
 
-  // Подключаемся сразу
   connect();
 
-  // Отправка формы через WebSocket
   document.getElementById('chat-form').addEventListener('submit', function(e) {
     e.preventDefault();
     const input = document.getElementById('chat-input');
@@ -298,8 +409,8 @@ function renderMessages() {
     input.value = '';
   });
 
-  // Загружаем начальные сообщения через API
-  const apiUrl = WITH_ID ? '/api/chat-data?with_user=' + WITH_ID : '/api/chat-data';
+  // Загружаем начальные сообщения
+  const apiUrl = '/api/chat-data?with_user=' + WITH_ID;
   fetch(apiUrl)
     .then(function(r) { return r.json(); })
     .then(function(msgs) {
@@ -307,7 +418,7 @@ function renderMessages() {
       renderMessages();
     })
     .catch(function() {});
+  {% endif %}
 })();
 </script>
-{% endif %}
 {% endblock %}

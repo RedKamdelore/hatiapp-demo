@@ -148,9 +148,9 @@ def logs_day(date_str: str, request: Request, db: Session = Depends(get_db)):
 
     # Слоты этого дня
     if user.role == ROLE_LEADER and user.led_directions:
-        leader_dir = user.led_directions[0].direction
+        leader_dir_ids = [ld.direction_id for ld in user.led_directions]
         slots = db.query(models.Slot).filter(
-            models.Slot.direction_id == leader_dir.id,
+            models.Slot.direction_id.in_(leader_dir_ids),
             models.Slot.date == target_date,
             models.Slot.capacity > 0,
         ).order_by(models.Slot.time).all()

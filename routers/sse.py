@@ -87,13 +87,20 @@ def _get_chat_data(user_id, other_id):
     db = SessionLocal()
     try:
         user = db.query(models.User).filter_by(id=user_id).first()
-        
-        if user and user.role == ROLE_LOTOS:
+        lotos_ids = [u.id for u in db.query(models.User).filter_by(role=ROLE_LOTOS, is_active=True).all()]
+
+        if other_id == 0:
+            # Обратная совместимость — сообщения с лотосами
+            if not lotos_ids:
+                return []
+            messages = db.query(models.ChatMessage).filter(
+                or_(
+                    and_(models.ChatMessage.sender_id == user_id, models.ChatMessage.receiver_id.in_(lotos_ids)),
+                    and_(models.ChatMessage.sender_id.in_(lotos_ids), models.ChatMessage.receiver_id == user_id),
+                )
+            ).order_by(models.ChatMessage.created_at.asc()).all()
+        elif user and user.role == ROLE_LOTOS:
             # Лотос видит ВСЕ сообщения между этим пользователем и ЛЮБЫМ лотосом
-            lotos_ids = [
-                u.id for u in 
-                db.query(models.User).filter_by(role=ROLE_LOTOS, is_active=True).all()
-            ]
             messages = db.query(models.ChatMessage).filter(
                 or_(
                     and_(models.ChatMessage.sender_id == other_id, models.ChatMessage.receiver_id.in_(lotos_ids)),
@@ -101,21 +108,14 @@ def _get_chat_data(user_id, other_id):
                 )
             ).order_by(models.ChatMessage.created_at.asc()).all()
         else:
-            # Волонтёр видит все сообщения со ВСЕМИ лотосами
-            lotos_ids = [
-                u.id for u in 
-                db.query(models.User).filter_by(role=ROLE_LOTOS, is_active=True).all()
-            ]
-            if not lotos_ids:
-                return []
-            
+            # Обычный диалог 1 на 1
             messages = db.query(models.ChatMessage).filter(
                 or_(
-                    and_(models.ChatMessage.sender_id == user_id, models.ChatMessage.receiver_id.in_(lotos_ids)),
-                    and_(models.ChatMessage.sender_id.in_(lotos_ids), models.ChatMessage.receiver_id == user_id),
+                    and_(models.ChatMessage.sender_id == user_id, models.ChatMessage.receiver_id == other_id),
+                    and_(models.ChatMessage.sender_id == other_id, models.ChatMessage.receiver_id == user_id),
                 )
             ).order_by(models.ChatMessage.created_at.asc()).all()
-        
+
         return [
             {
                 "id": m.id,
@@ -151,9 +151,6 @@ def _get_notify_data(user_id):
         user = db.query(models.User).filter_by(id=user_id).first()
         lotos_ids = [u.id for u in db.query(models.User).filter_by(role=ROLE_LOTOS, is_active=True).all()]
         
-        if not lotos_ids:
-            return {"unread": 0, "chats": []}
-
         if user and user.role == ROLE_LOTOS:
             # Для лотоса — по каждому диалогу (ВСЕ сообщения между пользователем и ЛЮБЫМ лотосом)
             sent = db.query(models.ChatMessage.receiver_id).filter(models.ChatMessage.sender_id.in_(lotos_ids)).distinct().all()
@@ -163,13 +160,12 @@ def _get_notify_data(user_id):
             chats = []
             for uid in all_ids:
                 if uid in lotos_ids:
-                    continue  # Пропускаем других лотосов
+                    continue
                     
                 read_record = db.query(models.ChatRead).filter_by(
                     user_id=user_id, other_id=uid
                 ).first()
 
-                # Считаем непрочитанные от пользователя к ЛЮБОМУ лотосу
                 q = db.query(func.count(models.ChatMessage.id)).filter(
                     models.ChatMessage.sender_id == uid,
                     models.ChatMessage.receiver_id.in_(lotos_ids),
@@ -183,22 +179,31 @@ def _get_notify_data(user_id):
             return {"unread": total, "chats": chats}
 
         else:
-            # Для волонтёра — новые от ЛЮБОГО лотоса после последнего прочтения
+            # Для любого пользователя — считаем непрочитанные от ВСЕХ отправителей
+            # Находим всех, кто писал пользователю
+            senders = db.query(models.ChatMessage.sender_id).filter(
+                models.ChatMessage.receiver_id == user_id
+            ).distinct().all()
+            
+            chats = []
             total_unread = 0
-            for lid in lotos_ids:
+            for (sender_id,) in senders:
                 read_record = db.query(models.ChatRead).filter_by(
-                    user_id=user_id, other_id=lid
+                    user_id=user_id, other_id=sender_id
                 ).first()
 
                 q = db.query(func.count(models.ChatMessage.id)).filter(
-                    models.ChatMessage.sender_id == lid,
+                    models.ChatMessage.sender_id == sender_id,
                     models.ChatMessage.receiver_id == user_id,
                 )
                 if read_record:
                     q = q.filter(models.ChatMessage.created_at > read_record.read_at)
-                total_unread += q.scalar() or 0
+                unread = q.scalar() or 0
+                if unread > 0:
+                    chats.append({"user_id": sender_id, "unread": unread})
+                    total_unread += unread
             
-            return {"unread": total_unread, "chats": []}
+            return {"unread": total_unread, "chats": chats}
     finally:
         db.close()
 
