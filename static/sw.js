@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hatiapp-v15';
+const CACHE_NAME = 'hatiapp-v16';
 
 // Static assets to precache on install
 const PRECACHE_URLS = [
