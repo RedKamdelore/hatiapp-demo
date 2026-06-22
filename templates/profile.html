@@ -96,6 +96,54 @@
   </form>
 </div>
 
+<!-- Уведомления -->
+<div class="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
+  <h3 class="text-sm font-semibold text-gray-600 mb-3">Уведомления</h3>
+  <button id="notif-toggle" type="button"
+    class="w-full text-sm px-4 py-2 rounded-xl transition">
+    🔔 Включить уведомления
+  </button>
+  <p id="notif-status" class="text-xs text-gray-400 mt-2 text-center"></p>
+</div>
+
+<script>
+(function() {
+  const btn = document.getElementById('notif-toggle');
+  const status = document.getElementById('notif-status');
+  if (!btn) return;
+
+  function updateUI() {
+    if (!('Notification' in window)) {
+      btn.textContent = '🔕 Уведомления не поддерживаются';
+      btn.className = 'w-full text-sm px-4 py-2 rounded-xl bg-gray-100 text-gray-500 transition';
+      status.textContent = 'Ваш браузер не поддерживает уведомления.';
+      return;
+    }
+    if (Notification.permission === 'granted') {
+      btn.textContent = '🔕 Уведомления включены';
+      btn.className = 'w-full text-sm px-4 py-2 rounded-xl bg-green-100 text-green-700 transition';
+      status.textContent = 'Вы будете получать напоминания о сменах и сообщениях, пока приложение открыто.';
+    } else if (Notification.permission === 'denied') {
+      btn.textContent = '🔒 Уведомления заблокированы';
+      btn.className = 'w-full text-sm px-4 py-2 rounded-xl bg-gray-100 text-gray-500 transition';
+      status.textContent = 'Разрешите уведомления в настройках браузера.';
+    } else {
+      btn.textContent = '🔔 Включить уведомления';
+      btn.className = 'w-full text-sm px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition';
+      status.textContent = '';
+    }
+  }
+
+  btn.addEventListener('click', async function() {
+    if (!('Notification' in window)) return;
+    await Notification.requestPermission();
+    updateUI();
+  });
+
+  updateUI();
+})();
+</script>
+
 <!-- Предпочтения направлений (только для волонтёров) -->
 {% if user.role == 'volunteer' and directions %}
 <div class="bg-white rounded-2xl border border-gray-200 p-4 mb-4">

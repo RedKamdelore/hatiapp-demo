@@ -1,0 +1,111 @@
+# Announcements: Implementation State
+
+> **For agentic workers:** This is the living summary of what has been built for the announcements feed ("Стена"). Refer to this before making further changes.
+
+## Goal
+Public announcements feed with posts, attachments, pinning, comments, polls, reactions, notifications, offline page cache, cache reset UI, and chat-based slot exchange.
+
+## Architecture
+- Models in `models.py`
+- REST API under `/api/announcements` and `/api/exchange-proposals`
+- HTML pages at `/announcements` and `/a/{post_id}`
+- SSE notifications via `services/sse_manager.py`
+- Offline HTML/data cache in `localStorage` and Service Worker `CacheStorage`
+- Slot exchange logic in `services/exchange.py`
+
+## Current State (as of 2026-06-22)
+
+### Implemented
+- **Stage 1 — Posts**
+  - `Announcement`, `AnnouncementAttachment` models
+  - Create/list/get/edit/delete/pin endpoints
+  - Feed page (`/announcements`) and single post page (`/a/{id}`)
+  - Image/video attachments with size limits
+  - SSE push notifications on new posts
+  - Bottom navigation tab + unread badge
+- **Stage 2 — Comments**
+  - `AnnouncementComment` model
+  - List/create/edit/delete comment endpoints
+  - Inline comments on single post page
+  - Author links to `/profile/{id}`
+- **Stage 3 — Polls**
+  - `AnnouncementPoll`, `PollOption`, `PollVote` models
+  - Single/multiple/text poll types
+  - Create/update/delete polls
+  - Vote, re-vote, delete own vote
+  - Anonymous vs. named polls with voter display
+- **Reactions**
+  - `AnnouncementReaction` model
+  - 6 reactions: 👍 ❤️ 😂 😮 😢 🔥
+  - Multiple reactions per user allowed
+  - Long-press reaction button (~0.7s) shows who reacted
+- **SPA / Offline fixes**
+  - Per-page scripts re-execute on SPA transitions
+  - Page HTML and API data cached to `localStorage`
+  - Offline reload guard saves current page
+  - `/chat/*` routes bypass SPA navigation
+  - Exception handler returns JSON for API/AJAX errors
+- **Cache reset UI**
+  - Long-press "Тема" button shows offline debug panel
+  - "Сбросить кеш" clears `localStorage` page/data cache and `CacheStorage`
+  - Auto-reloads page after reset
+- **Slot Exchange**
+  - `ExchangeProposal` model with statuses: `pending`, `accepted`, `declined`, `cancelled`, `expired`
+  - `ChatMessage.payload` JSON field for system exchange cards
+  - Service `services/exchange.py` with create/accept/decline/cancel/expire logic
+  - API `POST /api/exchange-proposals`, `/api/exchange-proposals/{id}/accept|decline|cancel`
+  - Pairwise swap of `Booking.user_id` with duplicate and time-conflict checks
+  - 3-hour proposal lifetime with `APScheduler` background expiration job
+  - Chat UI: 🔄 button, two-step modal, exchange card rendering, accept/decline/cancel buttons
+  - ActivityLog entries for all exchange events
+
+### Files Most Relevant
+- `models.py` — all announcement and exchange models
+- `routers/announcements.py` — announcements API + page routes
+- `routers/exchange.py` — exchange API routes
+- `routers/profile.py` — `/api/users/{id}/upcoming-shifts`, `/api/my-upcoming-shifts`
+- `routers/sse.py` — chat data endpoint
+- `services/exchange.py` — exchange business logic
+- `templates/announcements.html` — feed
+- `templates/announcement.html` — single post with comments, polls, reactions
+- `templates/base.html` — SPA nav, bottom bar, offline debug panel
+- `templates/chat.html` — chat with exchange UI
+- `static/chat-exchange.js` — exchange client-side logic
+- `static/page-cache.js` — cache helpers + `clearAll()`
+- `static/sw.js` — Service Worker offline strategy
+- `main.py` — scheduler startup
+- `tests/test_announcements.py`
+- `tests/test_announcement_comments.py`
+- `tests/test_announcement_polls.py`
+- `tests/test_announcement_reactions.py`
+- `tests/test_wall_navigation.py`
+- `tests/test_exchange.py`
+- `tests/test_exchange_service.py`
+- `tests/test_exchange_router.py`
+- `tests/test_user_upcoming_shifts.py`
+
+### Migrations
+- `baab75a93f8e_add_announcement_comments.py`
+- `b9f99a573f9c_add_announcement_polls.py`
+- `80d8addfb9ff_add_announcement_reactions.py`
+- `641801764e9c_add_exchange_proposals.py`
+
+### Last Known Test Result
+`140 passed, 1 skipped`
+
+### Notes
+- `test.db` is recreated by tests; production DB is SQLite at project root.
+- Service Worker cache name is `hatiapp-v15`; old SW may need manual unregister in DevTools if stale HTML persists.
+- The `theme-btn` is now a `<div>` (not `<button>`) to allow nested cache-reset button without breaking bottom nav layout.
+- `PRAGMA foreign_keys=ON` is enabled in `database.py`.
+
+## Things to Watch When Changing
+1. Keep comment routes registered **before** the generic `/{post_id}` route to avoid greedy-route 405.
+2. Any new per-page script must be in `{% block extra_scripts %}` or marked `data-shell="1"`.
+3. Chat pages should remain outside SPA navigation because they rely on global WebSocket state.
+4. New migrations on SQLite must avoid `ALTER COLUMN`; review autogenerated migrations and strip unrelated model drift.
+5. Exchange proposals have a unique constraint on `(sender_id, receiver_id, status)` to allow only one pending proposal per pair. Terminal statuses allow new proposals.
+6. `ChatMessage.payload` is mutated in-place; use `flag_modified(msg, "payload")` before commit.
+
+## Pending / Future Ideas
+- (none currently)

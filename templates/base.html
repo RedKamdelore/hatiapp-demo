@@ -137,7 +137,7 @@
 
     /* ── Нижняя навигация — БЕЗ анимации въезда ─────────────────────────── */
     .bottom-nav {
-      position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
       background: rgba(255,255,255,0.95);
       border-top: 1px solid #e5e7eb;
       display: flex; height: 64px;
@@ -224,8 +224,10 @@
     {% block content %}{% endblock %}
   </main>
 
-  <!-- Модалки (вне SPA-контейнера) -->
-  {% block modals %}{% endblock %}
+  <!-- Глобальные модалки -->
+  <div id="global-modals" class="fixed inset-0 z-50 pointer-events-none">
+    {% block modals %}{% endblock %}
+  </div>
 
   <!-- Нижняя навигация -->
   {% if user is defined and user %}
@@ -286,6 +288,15 @@
     </a>
     {% endif %}
 
+    <!-- Стена — у всех -->
+    <a href="/announcements" class="nav-item {% if request.url.path == '/announcements' or request.url.path.startswith('/a/') %}active{% endif %}" style="position:relative">
+      <svg viewBox="0 0 24 24" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h6v4.5H9V6.75Zm0 6h6v4.5H9v-4.5Z"/>
+      </svg>
+      <span id="announcement-badge" style="display:none;position:absolute;top:4px;right:8px;background:#ef4444;color:#fff;border-radius:50%;width:16px;height:16px;font-size:9px;font-weight:700;align-items:center;justify-content:center;"></span>
+      <span>Стена</span>
+    </a>
+
     <!-- Чат — у всех -->
     <a href="/chat" class="nav-item {% if request.url.path == '/chat' %}active{% endif %}" style="position:relative">
       <svg viewBox="0 0 24 24" stroke-width="1.8">
@@ -317,7 +328,7 @@
     {% endif %}
 
     <!-- Тёмная тема — у всех -->
-    <button class="nav-item" id="theme-btn" style="position:relative;">
+    <div class="nav-item" id="theme-btn" style="position:relative; cursor:pointer;">
       <svg id="theme-icon" viewBox="0 0 24 24" stroke-width="1.8">
         <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
       </svg>
@@ -327,14 +338,72 @@
         <div style="font-weight:bold; margin-bottom:6px; border-bottom:1px solid #555; padding-bottom:4px;">Офлайн-режим</div>
         <div>Статус: <span id="debug-status">...</span></div>
         <div>Сохранено: <span id="debug-pages">...</span> стр.</div>
+        <button type="button" id="debug-clear-cache" style="margin-top:8px; width:100%; padding:6px; border-radius:4px; border:none; background:#ef4444; color:#fff; font-size:11px; cursor:pointer;">Сбросить кеш</button>
         <div style="margin-top:6px; font-size:10px; color:#aaa;">Держите 3 сек</div>
       </div>
-    </button>
+    </div>
 
   </nav>
   {% endif %}
 
-<script>
+<script data-shell="1">
+  // ── Регистрация Service Worker ────────────────────────────────────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(function(registration) {
+        console.log('[SW] Registered:', registration.scope);
+
+        // Показываем предложение обновиться, если появился новый SW
+        registration.addEventListener('updatefound', function() {
+          const newWorker = registration.installing;
+          newWorker.addEventListener('statechange', function() {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('[SW] New version waiting');
+              showUpdateToast(newWorker);
+            }
+          });
+        });
+
+        // Регистрируем background sync для напоминаний
+        if ('SyncManager' in window) {
+          registration.sync.register('check-reminders').catch(function() {});
+        }
+      })
+      .catch(function(err) {
+        console.error('[SW] Registration failed:', err);
+      });
+
+    // Авто-перезагрузка при смене активного SW
+    var swReloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function() {
+      if (swReloading) return;
+      swReloading = true;
+      window.location.reload();
+    });
+  }
+
+  function showUpdateToast(worker) {
+    const container = document.getElementById('toast-container');
+    if (!container || typeof showToast !== 'function') return;
+
+    // Avoid duplicate toasts
+    if (document.getElementById('sw-update-toast')) return;
+
+    const toast = document.createElement('div');
+    toast.id = 'sw-update-toast';
+    toast.className = 'toast info';
+    toast.innerHTML = '<span>ℹ</span><span>Доступно обновление · <button id="sw-update-btn" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0;font:inherit;cursor:pointer;">Обновить</button></span>';
+    container.appendChild(toast);
+
+    requestAnimationFrame(function() {
+      toast.classList.add('show');
+    });
+
+    document.getElementById('sw-update-btn').addEventListener('click', function() {
+      worker.postMessage('skipWaiting');
+    });
+  }
+
   // ── SSE: закрываем все соединения при уходе со страницы ─────────────────
   const _openSSE = [];
   const _origEventSource = window.EventSource;
@@ -366,17 +435,29 @@
     const debug = document.getElementById('offline-debug');
     const statusEl = document.getElementById('debug-status');
     const pagesEl = document.getElementById('debug-pages');
+    const clearBtn = document.getElementById('debug-clear-cache');
     let pressTimer;
     let isLongPress = false;
 
     function updateStatus() {
       statusEl.textContent = navigator.onLine ? '🌐 Онлайн' : '📡 Офлайн';
-      
-      let count = 0;
-      for (let i = 0; i < localStorage.length; i++) {
-        if (localStorage.key(i).startsWith('page_')) count++;
-      }
-      pagesEl.textContent = count;
+      pagesEl.textContent = (window.pageCache && window.pageCache.pageCount) ? window.pageCache.pageCount() : 0;
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        isLongPress = true;
+        if (window.pageCache) await window.pageCache.clearAll();
+        updateStatus();
+        showToast('Кеш сброшен. Перезагрузка...', 'success');
+        setTimeout(() => location.reload(), 800);
+      });
+      clearBtn.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+      clearBtn.addEventListener('mouseup', function(e) { e.stopPropagation(); });
+      clearBtn.addEventListener('touchstart', function(e) { e.stopPropagation(); }, {passive: false});
+      clearBtn.addEventListener('touchend', function(e) { e.stopPropagation(); });
     }
 
     function startPress(e) {
@@ -404,50 +485,19 @@
     btn.addEventListener('mouseleave', () => { clearTimeout(pressTimer); });
   })();
 
-  // ── Навигация между страницами ──────────────────────────────────────────
-  // ВАЖНО: SSE-соединения закрываем ДО навигации — иначе мобильный браузер
-  // держит соединение и новая страница зависает на загрузке.
-  (function() {
-    const main = document.getElementById('main-content');
-    if (!main) return;
+  // ── Вспомогательная функция закрытия SSE ─────────────────────────────────
+  function closeAllSSE() {
+    _openSSE.forEach(function(es) { try { es.close(); } catch(e) {} });
+    _openSSE.length = 0;
+  }
 
-    function closeAllSSE() {
-      _openSSE.forEach(function(es) { try { es.close(); } catch(e) {} });
-      _openSSE.length = 0;
+  // POST-формы: закрываем SSE перед отправкой
+  document.addEventListener('submit', function(e) {
+    const form = e.target;
+    if (form.method && form.method.toLowerCase() === 'post') {
+      closeAllSSE();
     }
-
-    var _navigating = false;
-    function navigateTo(href) {
-      if (_navigating) return;       // блокируем повторные вызовы
-      _navigating = true;
-      closeAllSSE();                  // сначала закрываем SSE
-      location.href = href;
-    }
-
-    document.addEventListener('click', function(e) {
-      const link = e.target.closest('a[href]');
-      if (!link) return;
-      const href = link.getAttribute('href');
-      if (!href) return;
-      if (href.startsWith('http') && !href.startsWith(location.origin)) return;
-      if (href.startsWith('#') || href.startsWith('javascript')) return;
-      if (link.target === '_blank') return;
-      if (link.hasAttribute('download')) return;
-      const dest = new URL(href, location.origin).pathname;
-      if (dest === location.pathname) return;
-
-      e.preventDefault();
-      navigateTo(href);
-    });
-
-    // POST-формы: закрываем SSE перед отправкой
-    document.addEventListener('submit', function(e) {
-      const form = e.target;
-      if (form.method && form.method.toLowerCase() === 'post') {
-        closeAllSSE();
-      }
-    });
-  })();
+  });
 
   // ── Восстановление страницы при нажатии "Назад" (bfcache) ────────────────
   window.addEventListener('pageshow', function(event) {
@@ -509,14 +559,71 @@
     if (!badge) return;
 
     var es = null;
+    var reconnectTimer = null;
+    var backoffDelays = [2000, 5000, 10000, 30000];
+    var backoffIndex = 0;
+
+    var lastUnread = 0;
 
     function applyNotify(data) {
-      if (data.unread > 0) {
-        badge.textContent = data.unread > 9 ? '9+' : data.unread;
+      if (data.type === 'announcement') {
+        const badge = document.getElementById('announcement-badge');
+        if (badge) {
+          badge.textContent = '!';
+          badge.style.display = 'flex';
+        }
+        if (location.pathname !== '/announcements' && !location.pathname.startsWith('/a/')) {
+          if (typeof showToast === 'function') {
+            showToast('📢 ' + (data.title || 'Новое объявление'), 'info');
+          }
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('HatiApp — объявление', {
+              body: data.title || 'Новое объявление',
+              icon: '/static/icon-192.png',
+            });
+          }
+        }
+        return;
+      }
+
+      if (data.type === 'comment') {
+        if (location.pathname !== '/a/' + data.post_id) {
+          if (typeof showToast === 'function') {
+            showToast('💬 ' + (data.author_name || 'Новый комментарий') + ': ' + (data.post_title || 'к посту'), 'info');
+          }
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('HatiApp — комментарий', {
+              body: (data.author_name || 'Новый комментарий') + ' прокомментировал(а) ваш пост',
+              icon: '/static/icon-192.png',
+            });
+          }
+        }
+        return;
+      }
+
+      const prevUnread = lastUnread;
+      const newUnread = data.unread || 0;
+      lastUnread = newUnread;
+
+      if (newUnread > 0) {
+        badge.textContent = newUnread > 9 ? '9+' : newUnread;
         badge.style.display = 'flex';
       } else {
         badge.style.display = 'none';
       }
+
+      if (newUnread > prevUnread && location.pathname !== '/chat') {
+        if (typeof showToast === 'function') {
+          showToast('💬 Новое сообщение в чате', 'info');
+        }
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('HatiApp — сообщение', {
+            body: 'Новое сообщение в чате',
+            icon: '/static/icon-192.png',
+          });
+        }
+      }
+
       if (data.chats && data.chats.length > 0) {
         data.chats.forEach(function(c) {
           var el = document.getElementById('chat-unread-' + c.user_id);
@@ -532,9 +639,23 @@
       }
     }
 
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      var delay = backoffDelays[Math.min(backoffIndex, backoffDelays.length - 1)];
+      reconnectTimer = setTimeout(function() {
+        reconnectTimer = null;
+        backoffIndex++;
+        startSSE();
+      }, delay);
+    }
+
     function startSSE() {
-      if (es) return;
+      if (es || document.hidden) return;
       es = new EventSource('/sse/notify');
+
+      es.onopen = function() {
+        backoffIndex = 0;
+      };
 
       es.onmessage = function(event) {
         try {
@@ -544,14 +665,19 @@
       };
 
       es.onerror = function() {
-        es.close();
-        es = null;
-        // Переподключение через 5 секунд
-        setTimeout(startSSE, 5000);
+        if (es) {
+          es.close();
+          es = null;
+        }
+        scheduleReconnect();
       };
     }
 
     function stopSSE() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (es) {
         es.close();
         es = null;
@@ -559,7 +685,12 @@
     }
 
     document.addEventListener('visibilitychange', function() {
-      if (document.hidden) stopSSE(); else startSSE();
+      if (document.hidden) {
+        stopSSE();
+      } else {
+        backoffIndex = 0;
+        startSSE();
+      }
     });
 
     window.addEventListener('beforeunload', stopSSE);
@@ -568,208 +699,91 @@
   })();
 </script>
 
-{% block extra_scripts %}{% endblock %}
-
-<script>
-// SPA Offline Support via localStorage
+<script data-shell="1">
+// ── Напоминания о сменах (in-page) ────────────────────────────────────────
 (function() {
-  const CACHE_PREFIX = 'page_';
-  const MAX_PAGES = 30;
-  const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-  
-  // ── Save current page to cache ────────────────────────────────────────────
-  function savePage(pathname, html, title) {
+  const SHOWN_KEY = 'hatiapp_shown_reminders';
+
+  function getShown() {
+    try { return JSON.parse(localStorage.getItem(SHOWN_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+
+  function markShown(slotId, minutesBefore) {
+    const shown = getShown();
+    shown.push(`${slotId}:${minutesBefore}`);
+    while (shown.length > 100) shown.shift();
+    localStorage.setItem(SHOWN_KEY, JSON.stringify(shown));
+  }
+
+  function isShown(slotId, minutesBefore) {
+    return getShown().includes(`${slotId}:${minutesBefore}`);
+  }
+
+  async function checkReminders() {
     try {
-      const data = {
-        html: html,
-        title: title,
-        timestamp: Date.now()
-      };
-      localStorage.setItem(CACHE_PREFIX + pathname, JSON.stringify(data));
-      cleanupCache();
-    } catch(e) {
-      console.error('[Offline] Save failed:', e);
-    }
-  }
-  
-  // ── Load page from cache ─────────────────────────────────────────────────
-  function loadPage(pathname) {
-    try {
-      const cached = localStorage.getItem(CACHE_PREFIX + pathname);
-      if (!cached) return null;
-      
-      const data = JSON.parse(cached);
-      if (Date.now() - data.timestamp > MAX_AGE_MS) {
-        localStorage.removeItem(CACHE_PREFIX + pathname);
-        return null;
-      }
-      return data;
-    } catch(e) {
-      return null;
-    }
-  }
-  
-  // ── Cleanup old cache entries ────────────────────────────────────────────
-  function cleanupCache() {
-    try {
-      const entries = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(CACHE_PREFIX)) {
-          const data = JSON.parse(localStorage.getItem(key));
-          entries.push({ key, timestamp: data.timestamp });
-        }
-      }
-      entries.sort((a, b) => a.timestamp - b.timestamp);
-      while (entries.length > MAX_PAGES) {
-        localStorage.removeItem(entries.shift().key);
-      }
-      const now = Date.now();
-      entries.forEach(({ key, timestamp }) => {
-        if (now - timestamp > MAX_AGE_MS) {
-          localStorage.removeItem(key);
-        }
-      });
-    } catch(e) {}
-  }
-  
-  // ── Show offline indicator ───────────────────────────────────────────────
-  function showOfflineIndicator() {
-    let banner = document.getElementById('offline-banner');
-    if (!banner) {
-      banner = document.createElement('div');
-      banner.id = 'offline-banner';
-      banner.className = 'fixed top-0 left-0 right-0 bg-red-600 text-white text-center py-2 text-sm z-50 font-medium';
-      banner.innerHTML = '📡 Нет связи · Офлайн-режим';
-      document.body.prepend(banner);
-    }
-    document.body.classList.add('offline-mode');
-  }
-  
-  function hideOfflineIndicator() {
-    const banner = document.getElementById('offline-banner');
-    if (banner) banner.remove();
-    document.body.classList.remove('offline-mode');
-  }
-  
-  // ── Show cached content in main-content ──────────────────────────────────
-  function renderCachedPage(pathname, data) {
-    const mainContent = document.getElementById('main-content');
-    if (!mainContent || !data) return false;
-    
-    mainContent.innerHTML = data.html;
-    document.title = data.title;
-    
-    const timeStr = new Date(data.timestamp).toLocaleString('ru-RU', {
-      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
-    });
-    
-    // Hide all POST forms and QR buttons in offline mode
-    document.querySelectorAll('form[method="post"]').forEach(form => {
-      form.style.display = 'none';
-    });
-    
-    // Disable QR buttons in offline mode (show tooltip)
-    document.querySelectorAll('[data-qr-booking]').forEach(btn => {
-      btn.disabled = true;
-      btn.title = 'QR-код недоступен в офлайн-режиме';
-      btn.style.opacity = '0.5';
-    });
-    
-    // Re-attach link handlers to new content
-    attachLinkHandlers();
-    
-    return true;
-  }
-  
-  // ── Navigation: load page via AJAX or from cache ─────────────────────────
-  async function navigateTo(pathname, pushState = true) {
-    console.log('[SPA] Navigating to:', pathname);
-    
-    // Don't intercept logout or external links
-    if (pathname === '/logout' || pathname.startsWith('http')) {
-      window.location.href = pathname;
-      return;
-    }
-    
-    // Show loading state
-    const mainContent = document.getElementById('main-content');
-    if (mainContent) {
-      mainContent.style.opacity = '0.5';
-    }
-    
-    if (navigator.onLine) {
-      // Online: fetch page via AJAX
-      try {
-        const response = await fetch(pathname, {
-          headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
-        
-        if (response.ok) {
-          const html = await response.text();
-          
-          // Extract title and main content from HTML
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, 'text/html');
-          const newTitle = doc.title;
-          const newContent = doc.getElementById('main-content');
-          
-          if (mainContent && newContent) {
-            mainContent.innerHTML = newContent.innerHTML;
-            document.title = newTitle;
-            mainContent.style.opacity = '1';
-            
-            // Save to cache
-            savePage(pathname, newContent.innerHTML, newTitle);
-            
-            // Update URL without reload
-            if (pushState) {
-              history.pushState({ pathname: pathname }, '', pathname);
+      const res = await fetch('/api/my-upcoming-shifts');
+      if (!res.ok) return;
+      const shifts = await res.json();
+      const now = new Date();
+
+      shifts.forEach(function(s) {
+        const slotTime = new Date(s.datetime_iso);
+        const diffMin = (slotTime - now) / (1000 * 60);
+
+        [24 * 60, 2 * 60].forEach(function(minutesBefore) {
+          if (diffMin <= minutesBefore && diffMin > 0 && !isShown(s.slot_id, minutesBefore)) {
+            const when = minutesBefore === 24 * 60 ? 'завтра' : 'через 2 часа';
+            const text = `⏰ ${s.direction}: смена ${when} в ${s.time}`;
+            if (typeof showToast === 'function') showToast(text, 'info');
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('HatiApp — напоминание', {
+                body: text,
+                icon: '/static/icon-192.png',
+              });
             }
-            
-            // Re-attach handlers
-            attachLinkHandlers();
-            
-            // Update active nav item
-            updateActiveNav(pathname);
-            
-            return;
+            markShown(s.slot_id, minutesBefore);
           }
-        }
-      } catch(e) {
-        console.error('[SPA] Fetch failed:', e);
-      }
-    }
-    
-    // Offline or fetch failed: try cache
-    const cached = loadPage(pathname);
-    if (cached) {
-      renderCachedPage(pathname, cached);
-      if (mainContent) mainContent.style.opacity = '1';
-      
-      if (pushState) {
-        history.pushState({ pathname: pathname }, '', pathname);
-      }
-      updateActiveNav(pathname);
-      showOfflineIndicator();
-      return;
-    }
-    
-    // No cache available
-    if (mainContent) {
-      mainContent.style.opacity = '1';
-      mainContent.innerHTML = `
-        <div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-8 text-center">
-          <div class="text-4xl mb-4">📡</div>
-          <h2 class="text-xl font-bold mb-2">Нет связи</h2>
-          <p class="mb-4">Эта страница не была сохранена для офлайн-режима.</p>
-          <button onclick="history.back()" class="bg-red-600 text-white px-4 py-2 rounded-lg">← Назад</button>
-        </div>
-      `;
-    }
+        });
+      });
+    } catch (e) {}
   }
-  
-  // ── Update active navigation item ────────────────────────────────────────
+
+  if ('Notification' in window) {
+    checkReminders();
+    setInterval(checkReminders, 60 * 1000);
+  }
+})();
+</script>
+
+<div id="extra-scripts-container" style="display:none;">
+{% block extra_scripts %}{% endblock %}
+</div>
+
+<script data-shell="1" src="/static/page-cache.js"></script>
+
+<script data-shell="1">
+// SSE manager: one connection per page, reconnect with backoff
+(function() {
+  const _openSSE = [];
+  const _origEventSource = window.EventSource;
+  window.EventSource = function(url, cfg) {
+    const es = new _origEventSource(url, cfg);
+    _openSSE.push(es);
+    return es;
+  };
+  window.closeAllSSE = function() {
+    _openSSE.forEach(function(es) { try { es.close(); } catch(e) {} });
+    _openSSE.length = 0;
+  };
+  window.addEventListener('pagehide', closeAllSSE);
+  window.addEventListener('beforeunload', closeAllSSE);
+})();
+</script>
+
+<script data-shell="1">
+// Lightweight SPA navigation helper
+(function() {
   function updateActiveNav(pathname) {
     document.querySelectorAll('.nav-item').forEach(item => {
       item.classList.remove('active');
@@ -779,156 +793,179 @@
       }
     });
   }
-  
-  // ── Attach click handlers to all internal links ──────────────────────────
+
+  var _navigating = false;
+  async function navigateTo(pathname, pushState) {
+    if (_navigating) return;
+    _navigating = true;
+
+    if (pathname === '/logout' || pathname.startsWith('http')) {
+      window.location.href = pathname;
+      return;
+    }
+
+    if (typeof closeAllSSE === 'function') closeAllSSE();
+
+    const mainContent = document.getElementById('main-content');
+    if (mainContent) mainContent.style.opacity = '0.6';
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const response = await fetch(pathname, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const html = await response.text();
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const newTitle = doc.title;
+        const newContent = doc.getElementById('main-content');
+        const newModals = doc.getElementById('global-modals');
+        const newExtra = doc.getElementById('extra-scripts-container');
+
+        if (mainContent && newContent) {
+          mainContent.innerHTML = newContent.innerHTML;
+          document.title = newTitle;
+          if (mainContent) mainContent.style.opacity = '1';
+
+          if (newModals) {
+            const currentModals = document.getElementById('global-modals');
+            if (currentModals) {
+              currentModals.innerHTML = newModals.innerHTML;
+            }
+          }
+
+          if (newExtra) {
+            executeNewScripts(newExtra);
+          }
+
+          if (window.pageCache) window.pageCache.savePage(pathname, html);
+
+          if (pushState) {
+            history.pushState({ pathname: pathname }, '', pathname);
+          }
+
+          attachLinkHandlers();
+          updateActiveNav(pathname);
+          _navigating = false;
+          return;
+        }
+      }
+      window.location.href = pathname;
+    } catch (e) {
+      const cachedHtml = window.pageCache && window.pageCache.loadPage(pathname);
+      if (cachedHtml) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(cachedHtml, 'text/html');
+        const newTitle = doc.title;
+        const newContent = doc.getElementById('main-content');
+        const newModals = doc.getElementById('global-modals');
+        const newExtra = doc.getElementById('extra-scripts-container');
+
+        if (mainContent && newContent) {
+          mainContent.innerHTML = newContent.innerHTML;
+          document.title = newTitle;
+          if (mainContent) mainContent.style.opacity = '1';
+
+          if (newModals) {
+            const currentModals = document.getElementById('global-modals');
+            if (currentModals) {
+              currentModals.innerHTML = newModals.innerHTML;
+            }
+          }
+
+          if (newExtra) {
+            executeNewScripts(newExtra);
+          }
+
+          if (window.pageCache) {
+            window.pageCache.banner('Нет соединения — показана сохранённая версия страницы', 'main-content');
+          }
+
+          if (pushState) {
+            history.pushState({ pathname: pathname }, '', pathname);
+          }
+
+          attachLinkHandlers();
+          updateActiveNav(pathname);
+          _navigating = false;
+          return;
+        }
+      }
+      window.location.href = pathname;
+    }
+  }
+
+  function executeNewScripts(container) {
+    const existing = new Set();
+    document.querySelectorAll('script[data-shell="1"]').forEach(s => {
+      if (s.src) existing.add(s.src);
+      else existing.add(s.textContent.trim());
+    });
+
+    container.querySelectorAll('script').forEach(script => {
+      if (script.src && existing.has(script.src)) return;
+      const text = script.textContent.trim();
+      if (!text) return;
+      if (existing.has(text)) return;
+
+      const newScript = document.createElement('script');
+      if (script.src) newScript.src = script.src;
+      else newScript.textContent = text;
+      document.head.appendChild(newScript);
+      document.head.removeChild(newScript);
+    });
+  }
+
   function attachLinkHandlers() {
     document.querySelectorAll('a[href]').forEach(link => {
       const href = link.getAttribute('href');
-      
-      // Only handle internal links
-      if (!href || href.startsWith('http') || href.startsWith('#') || 
+      if (!href || href.startsWith('http') || href.startsWith('#') ||
           href.startsWith('javascript:') || href.startsWith('mailto:') ||
-          href === '/logout') {
+          href === '/logout' || link.target === '_blank' || link.hasAttribute('download')) {
         return;
       }
-      
-      // Skip if already handled
+      // Чат использует сложный JS (WebSocket, контекстное меню) — пока делаем полную перезагрузку
+      if (href.startsWith('/chat')) {
+        return;
+      }
       if (link.dataset.spaHandled) return;
       link.dataset.spaHandled = 'true';
-      
       link.addEventListener('click', function(e) {
-        // Don't intercept if modifier keys pressed
         if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
-        
         e.preventDefault();
-        navigateTo(href);
+        navigateTo(href, true);
       });
     });
   }
-  
-  // ── Handle browser back/forward ──────────────────────────────────────────
+
   window.addEventListener('popstate', function(e) {
-    if (e.state && e.state.pathname) {
-      navigateTo(e.state.pathname, false);
+    const expected = e.state && e.state.pathname;
+    if (expected) {
+      navigateTo(expected, false);
     }
   });
-  
-  // ── Online/Offline detection ─────────────────────────────────────────────
-  let wasOffline = false;
-  
-  function updateOnlineStatus() {
-    const isOnline = navigator.onLine;
-    
-    if (!isOnline) {
-      wasOffline = true;
-      showOfflineIndicator();
-    } else {
-      hideOfflineIndicator();
-      if (wasOffline) {
-        wasOffline = false;
-        // Show "back online" toast
-        showToast('🌐 Соединение восстановлено', 'success');
-      }
+
+  window.addEventListener('beforeunload', function() {
+    if (!navigator.onLine && window.pageCache) {
+      window.pageCache.savePage(location.pathname, document.documentElement.outerHTML);
     }
-  }
-  
-  // ── Show toast notification ──────────────────────────────────────────────
-  function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
-    
-    const toast = document.createElement('div');
-    toast.className = 'toast ' + type;
-    toast.textContent = message;
-    container.appendChild(toast);
-    
-    requestAnimationFrame(() => toast.classList.add('show'));
-    
-    setTimeout(() => {
-      toast.classList.remove('show');
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
-  }
-  
-  // ── Initialize ───────────────────────────────────────────────────────────
-  function init() {
-    // Save current page immediately
-    const mainContent = document.getElementById('main-content');
-    if (mainContent) {
-      savePage(location.pathname, mainContent.innerHTML, document.title);
-    }
-    
-    // Attach link handlers
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
     attachLinkHandlers();
-    
-    // Setup online/offline listeners
-    window.addEventListener('online', updateOnlineStatus);
-    window.addEventListener('offline', updateOnlineStatus);
-    
-    // Periodic save
-    setInterval(() => {
-      const mc = document.getElementById('main-content');
-      if (mc) savePage(location.pathname, mc.innerHTML, document.title);
-    }, 30000);
-    
-    // Save on visibility change
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
-        const mc = document.getElementById('main-content');
-        if (mc) savePage(location.pathname, mc.innerHTML, document.title);
+    updateActiveNav(location.pathname);
+    setTimeout(function() {
+      if (window.pageCache) {
+        window.pageCache.savePage(location.pathname, document.documentElement.outerHTML);
       }
-    });
-    
-    // Check initial state
-    if (!navigator.onLine) {
-      wasOffline = true;
-      showOfflineIndicator();
-      const cached = loadPage(location.pathname);
-      if (cached) {
-        renderCachedPage(location.pathname, cached);
-      }
-    }
-    
-    // Warn before reload in offline mode
-    window.addEventListener('beforeunload', function(e) {
-      if (!navigator.onLine) {
-        e.preventDefault();
-        e.returnValue = 'Вы в офлайн-режиме. Обновление страницы удалит доступ к сохранённым данным.';
-        return e.returnValue;
-      }
-    });
-    
-    // Handle page restore from bfcache (back button)
-    window.addEventListener('pageshow', function(e) {
-      if (e.persisted && !navigator.onLine) {
-        // Page restored from cache but we're offline
-        const cached = loadPage(location.pathname);
-        if (cached) {
-          renderCachedPage(location.pathname, cached);
-          showOfflineIndicator();
-        }
-      }
-    });
-    
-    // Prevent accidental pull-to-refresh on mobile when offline
-    let touchStartY = 0;
-    document.addEventListener('touchstart', function(e) {
-      touchStartY = e.touches[0].clientY;
-    }, { passive: true });
-    
-    document.addEventListener('touchmove', function(e) {
-      if (!navigator.onLine) {
-        const touchY = e.touches[0].clientY;
-        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-        // If at top of page and pulling down, prevent refresh
-        if (scrollTop <= 0 && touchY > touchStartY) {
-          e.preventDefault();
-        }
-      }
-    }, { passive: false });
-  }
-  
-  document.addEventListener('DOMContentLoaded', init);
+    }, 0);
+  });
 })();
 </script>
 

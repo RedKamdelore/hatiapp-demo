@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from datetime import datetime, date
 import math
+import json
 
 from database import get_db
 from services.auth import require_role
@@ -70,14 +71,28 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(models.AppSetting(key=key, value=value))
     db.commit()
 
+
+def _get_client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+
+ALLOWED_MASS_ROLES = (ROLE_LEADER, ROLE_LOTOS, ROLE_VOLUNTEER, ROLE_PERMANENT)
 
 
 @router.get("/admin", response_class=HTMLResponse)
 def admin_panel(
     request: Request,
     sort: str = Query(default="role_asc"),
+    q: str = Query(default=""),
+    role: str = Query(default=""),
+    status: str = Query(default=""),
+    direction: str = Query(default=""),
     db: Session = Depends(get_db),
 ):
     user = require_role(request, db, ROLE_ADMIN)
@@ -212,6 +227,7 @@ def admin_panel(
         "request": request,
         "user": user,
         "users": users,
+        "directions": directions,
         "dir_stats": dir_stats,
         "bookings_count": bookings_count,
         "available_slots": available_slots,
@@ -224,6 +240,10 @@ def admin_panel(
         "attendance_chart": attendance_chart,
         "day_coverage_stats": day_coverage_stats,
         "current_sort": sort,
+        "filter_q": q,
+        "filter_role": role,
+        "filter_status": status,
+        "filter_direction": direction,
     })
 
 
@@ -394,8 +414,10 @@ def mass_action_users(
     db: Session = Depends(get_db),
     action: str = Form(...),
     user_ids: list[int] = Form(default=[]),
+    new_role: str = Form(""),
+    direction_id: int | None = Form(None),
 ):
-    require_role(request, db, ROLE_ADMIN)
+    user = require_role(request, db, ROLE_ADMIN)
     if not user_ids:
         return RedirectResponse("/admin?toast=Никто+не+выбран&toast_type=error", status_code=302)
 
@@ -413,6 +435,55 @@ def mass_action_users(
             if u.role != ROLE_ADMIN:
                 db.delete(u)
                 count += 1
+        elif action == "change_role":
+            if u.role != ROLE_ADMIN and new_role in ALLOWED_MASS_ROLES:
+                u.role = new_role
+                count += 1
+        elif action == "add_to_direction":
+            if direction_id and u.role == ROLE_LEADER:
+                exists = db.query(models.DirectionLeader).filter_by(
+                    direction_id=direction_id, user_id=u.id
+                ).first()
+                if not exists:
+                    db.add(models.DirectionLeader(direction_id=direction_id, user_id=u.id))
+                    count += 1
+            elif direction_id and u.role == ROLE_VOLUNTEER:
+                exists = db.query(models.UserPreference).filter_by(
+                    direction_id=direction_id, user_id=u.id
+                ).first()
+                if not exists:
+                    db.add(models.UserPreference(direction_id=direction_id, user_id=u.id))
+                    count += 1
+        elif action == "remove_from_direction":
+            if direction_id and u.role == ROLE_LEADER:
+                link = db.query(models.DirectionLeader).filter_by(
+                    direction_id=direction_id, user_id=u.id
+                ).first()
+                if link:
+                    db.delete(link)
+                    count += 1
+            elif direction_id and u.role == ROLE_VOLUNTEER:
+                link = db.query(models.UserPreference).filter_by(
+                    direction_id=direction_id, user_id=u.id
+                ).first()
+                if link:
+                    db.delete(link)
+                    count += 1
+    if count > 0:
+        log_details = {"user_ids": user_ids}
+        if action == "change_role":
+            log_details["new_role"] = new_role
+        elif action in ("add_to_direction", "remove_from_direction"):
+            log_details["direction_id"] = direction_id
+
+        db.add(models.AdminActionLog(
+            admin_id=user.id,
+            action=action,
+            target_count=count,
+            details=json.dumps(log_details, ensure_ascii=False),
+            ip_address=_get_client_ip(request),
+            user_agent=request.headers.get("user-agent", ""),
+        ))
     db.commit()
 
     toast_msg = f"Обработано+{count}+пользователей"
@@ -634,9 +705,79 @@ def delete_direction(direction_id: int, request: Request, db: Session = Depends(
     require_role(request, db, ROLE_ADMIN)
     d = db.query(models.Direction).filter_by(id=direction_id).first()
     if d:
+        # Delete volunteer preferences for this direction
+        db.query(models.UserPreference).filter_by(direction_id=direction_id).delete(synchronize_session=False)
+
+        # Delete attendance records tied to bookings of this direction's slots
+        slot_ids = [s.id for s in db.query(models.Slot).filter_by(direction_id=direction_id).all()]
+        if slot_ids:
+            booking_ids = [b.id for b in db.query(models.Booking).filter(models.Booking.slot_id.in_(slot_ids)).all()]
+            if booking_ids:
+                db.query(models.Attendance).filter(models.Attendance.booking_id.in_(booking_ids)).delete(synchronize_session=False)
+
         db.delete(d)
         db.commit()
     return RedirectResponse("/admin", status_code=302)
+
+
+@router.post("/admin/direction/{direction_id}/edit")
+def edit_direction(
+    direction_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    name: str = Form(...),
+    description: str = Form(""),
+):
+    require_role(request, db, ROLE_ADMIN)
+    d = db.query(models.Direction).filter_by(id=direction_id).first()
+    if not d:
+        return RedirectResponse("/admin?toast=Направление+не+найдено&toast_type=error", status_code=302)
+
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/admin?toast=Название+обязательно&toast_type=error", status_code=302)
+
+    duplicate = db.query(models.Direction).filter(
+        models.Direction.name == name,
+        models.Direction.id != direction_id,
+    ).first()
+    if duplicate:
+        return RedirectResponse("/admin?toast=Направление+с+таким+названием+уже+есть&toast_type=error", status_code=302)
+
+    d.name = name
+    d.description = description.strip() or None
+    db.commit()
+    return RedirectResponse("/admin?toast=Направление+обновлено&toast_type=success", status_code=302)
+
+
+@router.get("/admin/direction/{direction_id}/delete-info")
+def direction_delete_info(
+    direction_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    require_role(request, db, ROLE_ADMIN)
+    d = db.query(models.Direction).filter_by(id=direction_id).first()
+    if not d:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    slots = db.query(models.Slot).filter_by(direction_id=direction_id).all()
+    slot_ids = [s.id for s in slots]
+
+    bookings_count = 0
+    if slot_ids:
+        bookings_count = db.query(models.Booking).filter(models.Booking.slot_id.in_(slot_ids)).count()
+
+    leaders_count = db.query(models.DirectionLeader).filter_by(direction_id=direction_id).count()
+    prefs_count = db.query(models.UserPreference).filter_by(direction_id=direction_id).count()
+
+    return JSONResponse({
+        "name": d.name,
+        "slots_count": len(slots),
+        "bookings_count": bookings_count,
+        "leaders_count": leaders_count,
+        "prefs_count": prefs_count,
+    })
 
 
 # ── Блокировка дней ───────────────────────────────────────────────────────────
@@ -828,6 +969,32 @@ def login_logs(
     total_pages = (total + per_page - 1) // per_page
 
     return templates.TemplateResponse("login_logs.html", {
+        "request": request,
+        "logs": logs,
+        "page": page,
+        "total_pages": total_pages,
+        "total": total,
+    })
+
+
+@router.get("/admin/action-logs", response_class=HTMLResponse)
+def action_logs(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    db: Session = Depends(get_db),
+):
+    require_role(request, db, ROLE_ADMIN)
+    per_page = 50
+    offset = (page - 1) * per_page
+
+    logs = db.query(models.AdminActionLog).options(
+        joinedload(models.AdminActionLog.admin)
+    ).order_by(models.AdminActionLog.created_at.desc()).offset(offset).limit(per_page).all()
+
+    total = db.query(func.count(models.AdminActionLog.id)).scalar()
+    total_pages = (total + per_page - 1) // per_page
+
+    return templates.TemplateResponse("action_logs.html", {
         "request": request,
         "logs": logs,
         "page": page,

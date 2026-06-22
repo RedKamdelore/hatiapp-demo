@@ -137,6 +137,7 @@ def _get_chat_data(user_id, other_id):
                 "text": m.text,
                 "sender_id": m.sender_id,
                 "sender_name": m.sender.full_name or m.sender.username,
+                "sender_username": m.sender.username,
                 "sender_role": m.sender.role,
                 "sender_avatar": m.sender.avatar or "",
                 "sender_initial": (m.sender.full_name or m.sender.username)[0].upper(),
@@ -144,10 +145,11 @@ def _get_chat_data(user_id, other_id):
                 "is_me": m.sender_id == user_id,
                 "attachment_url": m.attachment_url,
                 "reply_to_id": m.reply_to_id,
-                "reply_text": reply_data["text"] if reply_data else None,
-                "reply_sender_name": reply_data["sender_name"] if reply_data else None,
-                "deleted_for": deleted_for,
-            })
+            "reply_text": reply_data["text"] if reply_data else None,
+            "reply_sender_name": reply_data["sender_name"] if reply_data else None,
+            "deleted_for": deleted_for,
+            "payload": m.payload,
+        })
         return result
     finally:
         db.close()

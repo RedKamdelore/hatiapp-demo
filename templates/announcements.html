@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block title %}Объявления{% endblock %}
+{% block content %}
+<div class="space-y-4" id="feed">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Объявления</h1>
+    <button onclick="openCreateModal()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Новый пост</button>
+  </div>
+
+  <div id="pinned-list" class="space-y-3"></div>
+  <div id="posts-list" class="space-y-3"></div>
+
+  <button id="load-more" onclick="loadMore()" class="w-full py-3 text-indigo-600 font-medium hidden">Загрузить ещё</button>
+</div>
+{% endblock %}
+
+{% block modals %}
+<div id="create-modal" class="fixed inset-0 hidden" style="background-color: rgba(0,0,0,0.6); backdrop-filter: blur(2px); z-index: 100; pointer-events: auto;"
+     onclick="if(event.target === this) closeCreateModal();">
+  <div class="absolute inset-0 flex items-start justify-center p-4" style="padding-top: 10vh;">
+    <div class="bg-white dark:bg-[#1e1e1e] w-full max-w-2xl rounded-2xl p-4 space-y-4" style="max-height: 80vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold">Новое объявление</h2>
+        <button onclick="closeCreateModal()" class="text-gray-500 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-[#272727]">✕</button>
+      </div>
+      <form id="create-form" class="space-y-3" enctype="multipart/form-data">
+        <input type="text" name="title" placeholder="Заголовок (необязательно)" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"/>
+        <textarea name="content" rows="4" placeholder="Текст объявления" required class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"></textarea>
+        <input type="file" name="files" multiple accept="image/*,video/*" class="w-full text-sm"/>
+        <div class="border-t border-gray-100 dark:border-[#2e2e2e] pt-3 space-y-3">
+          <button type="button" onclick="toggleCreatePoll(this)" class="text-sm text-indigo-600 dark:text-indigo-400">+ Добавить опрос</button>
+          <div id="create-poll-fields" class="hidden space-y-3">
+            <input type="text" id="create-poll-question" placeholder="Вопрос опроса" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"/>
+            <select id="create-poll-type" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]">
+              <option value="single">Один вариант</option>
+              <option value="multiple">Несколько вариантов</option>
+              <option value="text">Текстовый ответ</option>
+            </select>
+            <div id="create-poll-options-wrapper" class="space-y-2">
+              <div id="create-poll-options-list" class="space-y-2"></div>
+              <button type="button" onclick="addCreatePollOption()" class="text-sm text-indigo-600 dark:text-indigo-400">+ Добавить вариант</button>
+            </div>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" id="create-poll-anonymous"/>
+              Анонимный опрос
+            </label>
+          </div>
+        </div>
+        {% if can_pin %}
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="is_pinned" value="true"/> Закрепить
+        </label>
+        {% endif %}
+        <button type="submit" class="w-full text-white py-2 rounded-lg font-medium" style="background-color: var(--p600);">Опубликовать</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  let offset = 0;
+  let limit = 10;
+
+  function openCreateModal() {
+    const modal = document.getElementById('create-modal');
+    if (modal) modal.classList.remove('hidden');
+  }
+  window.openCreateModal = openCreateModal;
+
+  function closeCreateModal() {
+    const modal = document.getElementById('create-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+  window.closeCreateModal = closeCreateModal;
+
+  async function loadFeed(reset) {
+    if (reset) {
+      const pl = document.getElementById('pinned-list');
+      const psl = document.getElementById('posts-list');
+      if (pl) pl.innerHTML = '';
+      if (psl) psl.innerHTML = '';
+      offset = 0;
+      if (window.pageCache) window.pageCache.hideBanner();
+    }
+    try {
+      const res = await fetch(`/api/announcements?limit=${limit}&offset=${offset}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (offset === 0) {
+        if (window.pageCache) window.pageCache.save('/announcements', data);
+        const pl = document.getElementById('pinned-list');
+        const psl = document.getElementById('posts-list');
+        if (pl) pl.innerHTML = '';
+        if (psl) psl.innerHTML = '';
+        if (window.pageCache) window.pageCache.hideBanner();
+      }
+      renderPosts(data.pinned, 'pinned-list', true);
+      renderPosts(data.posts, 'posts-list', false);
+      offset += data.posts.length;
+      const lm = document.getElementById('load-more');
+      if (lm) lm.classList.toggle('hidden', data.posts.length < limit);
+    } catch (e) {
+      if (!navigator.onLine && offset === 0 && window.pageCache) {
+        const cached = window.pageCache.load('/announcements');
+        if (cached) {
+          renderPosts(cached.pinned, 'pinned-list', true);
+          renderPosts(cached.posts, 'posts-list', false);
+          window.pageCache.banner('Нет соединения — показаны ранее загруженные объявления', 'feed');
+        }
+      }
+    }
+  }
+  window.loadFeed = loadFeed;
+  window.loadMore = function() { loadFeed(); };
+
+  function renderPosts(posts, containerId, isPinned) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    posts.forEach(post => {
+      const card = document.createElement('a');
+      card.href = `/a/${post.id}`;
+      card.className = 'block bg-white dark:bg-[#1e1e1e] rounded-xl p-4 shadow-sm border border-gray-100 dark:border-[#2e2e2e]';
+      const pin = isPinned ? '<span class="text-xs bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200 px-2 py-0.5 rounded mb-2 inline-block">Закреплено</span>' : '';
+      const pollBadge = post.poll ? '<span class="text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200 px-2 py-0.5 rounded mb-2 inline-block">Опрос</span>' : '';
+      const title = post.title ? `<h3 class="font-bold text-lg mb-1">${escapeHtml(post.title)}</h3>` : '';
+      const text = `<p class="text-gray-600 dark:text-gray-400 text-sm line-clamp-3">${escapeHtml(post.content)}</p>`;
+      const preview = post.attachments.length > 0 ? renderAttachmentPreview(post.attachments[0]) : '';
+      const reactions = post.reactions ? renderReactions(post.reactions) : '';
+      const meta = `<div class="text-xs text-gray-400 mt-2">${escapeHtml(post.author.full_name || post.author.username)} · ${formatDate(post.created_at)} ${post.attachments.length > 1 ? '· 📎' : ''}</div>`;
+      card.innerHTML = pin + pollBadge + title + text + preview + reactions + meta;
+      container.appendChild(card);
+    });
+  }
+
+  const REACTION_LABELS = {
+    like: '👍', love: '❤️', laugh: '😂', wow: '😮', sad: '😢', fire: '🔥'
+  };
+
+  function renderReactions(reactions) {
+    const active = Object.entries(REACTION_LABELS).filter(([k]) => (reactions.counts[k] || 0) > 0);
+    if (!active.length) return '';
+    return `<div class="flex flex-wrap gap-1.5 mt-3" onclick="event.preventDefault();">
+      ${active.map(([k, label]) => `
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm bg-gray-100 dark:bg-[#272727] border border-gray-200 dark:border-[#333]">
+          <span>${label}</span>
+          <span class="text-xs text-gray-600 dark:text-gray-400">${reactions.counts[k]}</span>
+        </span>`).join('')}
+    </div>`;
+  }
+
+  function renderAttachmentPreview(attachment) {
+    if (attachment.type === 'image') {
+      return `<div class="mt-3 rounded-lg overflow-hidden aspect-square"><img src="${escapeHtml(attachment.url)}" class="w-full h-full object-cover" loading="lazy"/></div>`;
+    }
+    if (attachment.type === 'video') {
+      return `<div class="mt-3 rounded-lg overflow-hidden relative flex items-center justify-center bg-gray-900 aspect-square"><span class="text-white text-3xl">▶</span></div>`;
+    }
+    return '';
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function formatDate(iso) {
+    const d = new Date(iso);
+    return d.toLocaleString('ru-RU', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  }
+
+  const form = document.getElementById('create-form');
+  if (form) {
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const formData = new FormData(this);
+      const pollQuestion = document.getElementById('create-poll-question').value.trim();
+      const pollType = document.getElementById('create-poll-type').value;
+      const pollAnonymous = document.getElementById('create-poll-anonymous').checked;
+      const pollOptions = pollType === 'text' ? [] : getCreatePollOptions();
+      const withPoll = !!pollQuestion;
+
+      if (withPoll && pollType !== 'text' && pollOptions.length < 2) {
+        showToast('Добавьте минимум 2 варианта опроса', 'error');
+        return;
+      }
+
+      const res = await fetch('/api/announcements', { method: 'POST', body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        if (withPoll) {
+          const pollBody = new URLSearchParams({
+            question: pollQuestion,
+            poll_type: pollType,
+            options: JSON.stringify(pollOptions),
+            is_anonymous: pollAnonymous,
+          });
+          await fetch(`/api/announcements/${data.id}/poll`, { method: 'POST', body: pollBody });
+        }
+        closeCreateModal();
+        this.reset();
+        resetCreatePoll();
+        loadFeed(true);
+      } else {
+        try {
+          const err = await res.json();
+          showToast(err.detail || 'Ошибка', 'error');
+        } catch(e) {}
+      }
+    });
+  }
+
+  function toggleCreatePoll(btn) {
+    const fields = document.getElementById('create-poll-fields');
+    fields.classList.toggle('hidden');
+    btn.textContent = fields.classList.contains('hidden') ? '+ Добавить опрос' : 'Скрыть опрос';
+    if (!fields.classList.contains('hidden') && !document.querySelector('#create-poll-options-list .create-poll-option-row')) {
+      addCreatePollOption();
+      addCreatePollOption();
+    }
+  }
+  window.toggleCreatePoll = toggleCreatePoll;
+
+  function addCreatePollOption(value = '') {
+    const list = document.getElementById('create-poll-options-list');
+    const row = document.createElement('div');
+    row.className = 'flex gap-2 create-poll-option-row';
+    row.innerHTML = `
+      <input type="text" value="${escapeHtml(value)}" class="create-poll-option-input w-full border rounded-lg px-3 py-2 dark:bg-[#181818]" placeholder="Вариант"/>
+      <button type="button" onclick="this.closest('.create-poll-option-row').remove()" class="text-red-500">✕</button>
+    `;
+    list.appendChild(row);
+  }
+  window.addCreatePollOption = addCreatePollOption;
+
+  function getCreatePollOptions() {
+    return Array.from(document.querySelectorAll('.create-poll-option-input'))
+      .map(i => i.value.trim())
+      .filter(v => v);
+  }
+
+  function resetCreatePoll() {
+    document.getElementById('create-poll-question').value = '';
+    document.getElementById('create-poll-type').value = 'single';
+    document.getElementById('create-poll-anonymous').checked = false;
+    document.getElementById('create-poll-options-list').innerHTML = '';
+    document.getElementById('create-poll-options-wrapper').classList.remove('hidden');
+    document.getElementById('create-poll-fields').classList.add('hidden');
+  }
+
+  document.getElementById('create-poll-type').addEventListener('change', function() {
+    const wrapper = document.getElementById('create-poll-options-wrapper');
+    if (this.value === 'text') {
+      wrapper.classList.add('hidden');
+    } else {
+      wrapper.classList.remove('hidden');
+      if (!document.querySelector('#create-poll-options-list .create-poll-option-row')) {
+        addCreatePollOption();
+        addCreatePollOption();
+      }
+    }
+  });
+
+  loadFeed(true);
+})();
+</script>
+{% endblock %}

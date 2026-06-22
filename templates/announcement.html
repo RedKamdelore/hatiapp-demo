@@ -1,0 +1,748 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title or 'Объявление' }}{% endblock %}
+{% block content %}
+<div class="bg-white dark:bg-[#1e1e1e] rounded-xl p-4 shadow-sm border border-gray-100 dark:border-[#2e2e2e] space-y-4" id="post-card">
+  <div class="flex items-start justify-between gap-2">
+    <div>
+      <div class="text-sm text-gray-500 dark:text-gray-400">{{ post.author.full_name or post.author.username }}</div>
+      <div class="text-xs text-gray-400">{{ post.created_at.strftime('%d %b %Y %H:%M') }}</div>
+    </div>
+    <div class="flex gap-2 flex-wrap justify-end">
+      {% if can_pin %}
+      <button onclick="togglePin()" class="text-sm text-indigo-600 dark:text-indigo-400">{{ 'Открепить' if post.is_pinned else 'Закрепить' }}</button>
+      {% endif %}
+      {% if can_edit %}
+      <button onclick="startEdit()" class="text-sm text-gray-600 dark:text-gray-400">Редактировать</button>
+      <button onclick="deletePost()" class="text-sm text-red-600">Удалить</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div id="view-mode">
+    {% if post.title %}<h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">{{ post.title }}</h1>{% endif %}
+    <div class="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ post.content }}</div>
+  </div>
+
+  <form id="edit-form" class="hidden space-y-3" enctype="multipart/form-data">
+    <input type="text" name="title" id="edit-title" value="{{ post.title or '' }}" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"/>
+    <textarea name="content" id="edit-content" rows="6" required class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]">{{ post.content }}</textarea>
+    <input type="file" name="files" multiple accept="image/*,video/*" class="w-full text-sm"/>
+
+    {% if can_edit %}
+    <div id="poll-builder" class="border-t border-gray-100 dark:border-[#2e2e2e] pt-3 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="font-medium">Опрос</span>
+        <button type="button" onclick="togglePollBuilder()" id="poll-toggle-btn" class="text-sm text-indigo-600 dark:text-indigo-400">{{ 'Изменить' if post.poll else 'Добавить' }}</button>
+      </div>
+      <div id="poll-builder-form" class="{% if not post.poll %}hidden{% endif %} space-y-3">
+        <input type="text" id="poll-question-input" placeholder="Вопрос опроса" value="{{ post.poll.question if post.poll else '' }}" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"/>
+        <select id="poll-type-input" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]">
+          <option value="single" {{ 'selected' if post.poll and post.poll.poll_type == 'single' else '' }}>Один вариант</option>
+          <option value="multiple" {{ 'selected' if post.poll and post.poll.poll_type == 'multiple' else '' }}>Несколько вариантов</option>
+          <option value="text" {{ 'selected' if post.poll and post.poll.poll_type == 'text' else '' }}>Текстовый ответ</option>
+        </select>
+        <div id="poll-options-wrapper" class="{% if post.poll and post.poll.poll_type == 'text' %}hidden{% endif %} space-y-2">
+          <div id="poll-options-list" class="space-y-2">
+            {% if post.poll %}
+              {% for opt in post.poll.options %}
+              <div class="flex gap-2 poll-option-row">
+                <input type="text" value="{{ opt.label }}" class="poll-option-input w-full border rounded-lg px-3 py-2 dark:bg-[#181818]" placeholder="Вариант"/>
+                <button type="button" onclick="removePollOption(this)" class="text-red-500">✕</button>
+              </div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <button type="button" onclick="addPollOption()" class="text-sm text-indigo-600 dark:text-indigo-400">+ Добавить вариант</button>
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" id="poll-anonymous-input" {% if post.poll and post.poll.is_anonymous %}checked{% endif %}/>
+          Анонимный опрос
+        </label>
+        <div class="flex gap-2">
+          <button type="button" onclick="savePoll()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Сохранить опрос</button>
+          {% if post.poll %}
+          <button type="button" onclick="deletePoll()" class="text-red-600 px-4 py-2 rounded-lg text-sm border dark:border-[#333]">Удалить</button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="flex gap-2">
+      <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium">Сохранить</button>
+      <button type="button" onclick="cancelEdit()" class="px-4 py-2 rounded-lg border dark:border-[#333]">Отмена</button>
+    </div>
+  </form>
+
+  {% if post.attachments %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    {% for a in post.attachments %}
+      <div class="relative group rounded-lg overflow-hidden">
+        {% if a.file_type == 'image' %}
+        <img src="{{ a.file_path }}" class="max-h-96 object-cover w-full rounded-lg"/>
+        {% else %}
+        <video src="{{ a.file_path }}" controls class="rounded-lg w-full"></video>
+        {% endif %}
+        <a href="{{ a.file_path }}" download class="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 text-white text-xs px-3 py-1.5 rounded-lg flex items-center gap-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M7.5 12l4.5 4.5m0 0l4.5-4.5M12 16.5V3"/>
+          </svg>
+          Скачать
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div id="poll-container" class="{% if not post.poll %}hidden{% endif %} border-t border-gray-100 dark:border-[#2e2e2e] pt-4 space-y-3">
+    <div id="poll-view" class="space-y-3">
+      <div class="font-medium" id="poll-question">{{ post.poll.question if post.poll else '' }}</div>
+      <div id="poll-form-container"></div>
+      <div id="poll-results" class="hidden space-y-2"></div>
+    </div>
+  </div>
+
+  <div id="reactions-bar" class="border-t border-gray-100 dark:border-[#2e2e2e] pt-3 flex flex-wrap gap-2"></div>
+  <div id="reaction-users-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-[#1e1e1e] rounded-xl p-4 w-full max-w-sm max-h-[80vh] overflow-y-auto shadow-xl">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold" id="reaction-users-title"></h3>
+        <button onclick="closeReactionUsers()" class="text-gray-500">✕</button>
+      </div>
+      <div id="reaction-users-list" class="space-y-2"></div>
+    </div>
+  </div>
+</div>
+
+<div class="bg-white dark:bg-[#1e1e1e] rounded-xl p-4 shadow-sm border border-gray-100 dark:border-[#2e2e2e] space-y-4 mt-4" id="comments-section">
+  <h2 class="font-bold text-lg">Комментарии</h2>
+
+  <form id="comment-form" class="space-y-2">
+    <textarea name="content" rows="2" placeholder="Написать комментарий..." required class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"></textarea>
+    <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Отправить</button>
+  </form>
+
+  <div id="comments-list" class="space-y-3"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const postId = {{ post.id }};
+
+function startEdit() {
+  document.getElementById('view-mode').classList.add('hidden');
+  document.getElementById('edit-form').classList.remove('hidden');
+  const pollContainer = document.getElementById('poll-container');
+  if (pollContainer) pollContainer.classList.add('hidden');
+}
+function cancelEdit() {
+  document.getElementById('view-mode').classList.remove('hidden');
+  document.getElementById('edit-form').classList.add('hidden');
+  const pollContainer = document.getElementById('poll-container');
+  if (pollContainer) {
+    if (pollExists) pollContainer.classList.remove('hidden');
+    else pollContainer.classList.add('hidden');
+  }
+}
+
+document.getElementById('edit-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const formData = new FormData(this);
+  const res = await fetch(`/api/announcements/${postId}`, { method: 'PUT', body: formData });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Ошибка', 'error');
+  }
+});
+
+async function deletePost() {
+  if (!confirm('Удалить объявление?')) return;
+  const res = await fetch(`/api/announcements/${postId}`, { method: 'DELETE' });
+  if (res.ok) {
+    location.href = '/announcements';
+  } else {
+    showToast('Ошибка удаления', 'error');
+  }
+}
+
+async function togglePin() {
+  const res = await fetch(`/api/announcements/${postId}/pin`, { method: 'POST' });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Ошибка', 'error');
+  }
+}
+
+const currentUserId = {{ user.id }};
+const currentUserRole = '{{ user.role }}';
+
+function roleLabel(role) {
+  const labels = {
+    admin: 'Админ',
+    leader: 'Руководитель',
+    lotos: 'Лотос',
+    permanent: 'Постоянный',
+    volunteer: 'Волонтёр',
+  };
+  return labels[role] || role;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString('ru-RU', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+
+function canModerateComment(comment) {
+  return comment.author.id === currentUserId || ['admin','lotos','leader'].includes(currentUserRole);
+}
+
+async function loadComments() {
+  try {
+    const res = await fetch(`/api/announcements/${postId}/comments`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderComments(data.comments);
+  } catch (e) {}
+}
+
+function renderComments(comments) {
+  const container = document.getElementById('comments-list');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!comments.length) {
+    container.innerHTML = '<div class="text-sm text-gray-400">Пока нет комментариев</div>';
+    return;
+  }
+  comments.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'flex gap-3';
+    el.id = `comment-${c.id}`;
+    const avatar = c.author.avatar
+      ? `<img src="/static/avatars/${escapeHtml(c.author.avatar)}" class="w-9 h-9 rounded-full object-cover flex-shrink-0"/>`
+      : `<div class="w-9 h-9 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-sm font-bold flex-shrink-0">${escapeHtml((c.author.full_name || c.author.username).charAt(0))}</div>`;
+    const editBtn = canModerateComment(c)
+      ? `<button onclick="startEditComment(${c.id})" class="text-xs text-gray-500 hover:text-indigo-600">Редактировать</button><button onclick="deleteComment(${c.id})" class="text-xs text-red-500 hover:text-red-700">Удалить</button>`
+      : '';
+    el.innerHTML = `
+      <a href="/profile/${c.author.id}" class="flex-shrink-0">${avatar}</a>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <a href="/profile/${c.author.id}" class="font-medium text-sm hover:text-indigo-600">${escapeHtml(c.author.full_name || c.author.username)}</a>
+          <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-[#272727] text-gray-600 dark:text-gray-400">${roleLabel(c.author.role)}</span>
+          <span class="text-xs text-gray-400">${formatDate(c.created_at)} ${c.updated_at && c.updated_at !== c.created_at ? '(изменён)' : ''}</span>
+        </div>
+        <div class="text-sm text-gray-800 dark:text-gray-200 mt-1 whitespace-pre-wrap" id="comment-text-${c.id}">${escapeHtml(c.content)}</div>
+        <div class="flex gap-3 mt-1">${editBtn}</div>
+      </div>
+    `;
+    container.appendChild(el);
+  });
+}
+
+document.getElementById('comment-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const textarea = this.querySelector('textarea[name="content"]');
+  const content = textarea.value.trim();
+  if (!content) return;
+  const res = await fetch(`/api/announcements/${postId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ content }),
+  });
+  if (res.ok) {
+    textarea.value = '';
+    loadComments();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Ошибка', 'error');
+  }
+});
+
+function startEditComment(commentId) {
+  const textEl = document.getElementById(`comment-text-${commentId}`);
+  const currentText = textEl.textContent;
+  const container = textEl.parentElement;
+  textEl.classList.add('hidden');
+  const form = document.createElement('form');
+  form.className = 'mt-1 space-y-2';
+  form.innerHTML = `
+    <textarea rows="2" required class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818] text-sm">${escapeHtml(currentText)}</textarea>
+    <div class="flex gap-2">
+      <button type="submit" class="bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium">Сохранить</button>
+      <button type="button" class="px-3 py-1 rounded text-xs border dark:border-[#333]">Отмена</button>
+    </div>
+  `;
+  form.querySelector('button[type="button"]').addEventListener('click', function() {
+    form.remove();
+    textEl.classList.remove('hidden');
+  });
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const newContent = this.querySelector('textarea').value.trim();
+    const res = await fetch(`/api/announcements/${postId}/comments/${commentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ content: newContent }),
+    });
+    if (res.ok) {
+      loadComments();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Ошибка', 'error');
+    }
+  });
+  container.appendChild(form);
+}
+
+async function deleteComment(commentId) {
+  if (!confirm('Удалить комментарий?')) return;
+  const res = await fetch(`/api/announcements/${postId}/comments/${commentId}`, { method: 'DELETE' });
+  if (res.ok) {
+    loadComments();
+  } else {
+    showToast('Ошибка удаления', 'error');
+  }
+}
+
+loadComments();
+
+const canEditPoll = {{ 'true' if can_edit else 'false' }};
+let pollExists = {{ 'true' if post.poll else 'false' }};
+
+function togglePollBuilder() {
+  const form = document.getElementById('poll-builder-form');
+  const btn = document.getElementById('poll-toggle-btn');
+  form.classList.toggle('hidden');
+  btn.textContent = form.classList.contains('hidden') ? (pollExists ? 'Изменить' : 'Добавить') : 'Скрыть';
+}
+
+function addPollOption(value = '') {
+  const list = document.getElementById('poll-options-list');
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 poll-option-row';
+  row.innerHTML = `
+    <input type="text" value="${escapeHtml(value)}" class="poll-option-input w-full border rounded-lg px-3 py-2 dark:bg-[#181818]" placeholder="Вариант"/>
+    <button type="button" onclick="removePollOption(this)" class="text-red-500">✕</button>
+  `;
+  list.appendChild(row);
+}
+
+function removePollOption(btn) {
+  btn.closest('.poll-option-row').remove();
+}
+
+function getPollOptions() {
+  return Array.from(document.querySelectorAll('.poll-option-input'))
+    .map(i => i.value.trim())
+    .filter(v => v);
+}
+
+const pollTypeInput = document.getElementById('poll-type-input');
+if (pollTypeInput) {
+  pollTypeInput.addEventListener('change', function() {
+    const wrapper = document.getElementById('poll-options-wrapper');
+    if (this.value === 'text') {
+      wrapper.classList.add('hidden');
+    } else {
+      wrapper.classList.remove('hidden');
+    }
+  });
+}
+
+async function savePoll() {
+  const question = document.getElementById('poll-question-input').value.trim();
+  const type = document.getElementById('poll-type-input').value;
+  const anonymous = document.getElementById('poll-anonymous-input').checked;
+  const options = type === 'text' ? [] : getPollOptions();
+
+  if (!question) {
+    showToast('Введите вопрос', 'error');
+    return;
+  }
+  if (type !== 'text' && options.length < 2) {
+    showToast('Добавьте минимум 2 варианта', 'error');
+    return;
+  }
+
+  const body = new URLSearchParams({
+    question,
+    poll_type: type,
+    options: JSON.stringify(options),
+    is_anonymous: anonymous,
+  });
+  const method = pollExists ? 'PUT' : 'POST';
+  const res = await fetch(`/api/announcements/${postId}/poll`, { method, body });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Ошибка', 'error');
+  }
+}
+
+async function deletePoll() {
+  if (!confirm('Удалить опрос?')) return;
+  const res = await fetch(`/api/announcements/${postId}/poll`, { method: 'DELETE' });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Ошибка', 'error');
+  }
+}
+
+async function loadPoll() {
+  const container = document.getElementById('poll-container');
+  const formContainer = document.getElementById('poll-form-container');
+  const results = document.getElementById('poll-results');
+  try {
+    console.log('[poll] loadPoll start, postId=', postId);
+    const url = `/api/announcements/${postId}/poll`;
+    console.log('[poll] fetching', url);
+    const res = await fetch(url, { cache: 'no-store' });
+    console.log('[poll] response status', res.status);
+    if (!res.ok) {
+      if (res.status === 404) {
+        container.classList.add('hidden');
+      } else {
+        formContainer.innerHTML = `<div class="text-sm text-red-600">Ошибка загрузки опроса (${res.status})</div>`;
+      }
+      return;
+    }
+    const text = await res.text();
+    console.log('[poll] response text', text.substring(0, 200));
+    let poll;
+    try {
+      poll = JSON.parse(text);
+    } catch (parseErr) {
+      console.error('[poll] JSON parse error', parseErr);
+      formContainer.innerHTML = `<div class="text-sm text-red-600">Ошибка разбора ответа опроса</div>`;
+      return;
+    }
+    console.log('[poll] parsed', poll);
+    renderPoll(poll);
+  } catch (e) {
+    console.error('[poll] loadPoll error', e);
+    formContainer.innerHTML = `<div class="text-sm text-red-600">Ошибка загрузки опроса: ${e.message}</div>`;
+  }
+}
+
+function hasVoted(poll) {
+  if (poll.poll_type === 'text') return !!poll.text_answer;
+  return poll.user_votes && poll.user_votes.length > 0;
+}
+
+function voterAvatar(user) {
+  if (user.avatar) {
+    return `<img src="/static/avatars/${escapeHtml(user.avatar)}" class="w-7 h-7 rounded-full object-cover flex-shrink-0"/>`;
+  }
+  const initial = escapeHtml((user.full_name || user.username).charAt(0));
+  return `<div class="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-xs font-bold flex-shrink-0">${initial}</div>`;
+}
+
+function renderPoll(poll) {
+  const container = document.getElementById('poll-container');
+  container.classList.remove('hidden');
+  document.getElementById('poll-question').textContent = poll.question;
+  if (poll.options && poll.options.length) {
+    if (hasVoted(poll)) {
+      renderPollResults(poll);
+    } else {
+      renderPollVote(poll);
+    }
+  } else if (poll.poll_type === 'text') {
+    if (hasVoted(poll)) {
+      renderPollResults(poll);
+    } else {
+      renderPollVote(poll);
+    }
+  } else {
+    const formContainer = document.getElementById('poll-form-container');
+    const results = document.getElementById('poll-results');
+    formContainer.innerHTML = '';
+    results.classList.remove('hidden');
+    results.innerHTML = '<div class="text-sm text-gray-400">Опрос недоступен</div>';
+  }
+}
+
+function renderPollVote(poll) {
+  const formContainer = document.getElementById('poll-form-container');
+  const results = document.getElementById('poll-results');
+  results.classList.add('hidden');
+  results.innerHTML = '';
+
+  if (poll.poll_type === 'text') {
+    formContainer.innerHTML = `
+      <textarea id="poll-text-answer" rows="3" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]" placeholder="Ваш ответ"></textarea>
+      <button type="button" onclick="submitPollVote()" class="mt-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Отправить</button>
+    `;
+    return;
+  }
+
+  const inputType = poll.poll_type === 'single' ? 'radio' : 'checkbox';
+  const name = `poll-option-${poll.id}`;
+  let html = `<div class="space-y-2">`;
+  poll.options.forEach(opt => {
+    html += `
+      <label class="flex items-start gap-2 p-2 rounded-lg border dark:border-[#333] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#272727]">
+        <input type="${inputType}" name="${name}" value="${opt.id}" class="mt-1 poll-vote-input"/>
+        <span class="text-sm">${escapeHtml(opt.label)}</span>
+      </label>
+    `;
+  });
+  html += `</div>
+    <button type="button" onclick="submitPollVote()" class="mt-3 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">Голосовать</button>
+  `;
+  formContainer.innerHTML = html;
+}
+
+function renderPollResults(poll) {
+  const formContainer = document.getElementById('poll-form-container');
+  const results = document.getElementById('poll-results');
+  formContainer.innerHTML = '';
+  results.classList.remove('hidden');
+
+  if (poll.poll_type === 'text') {
+    let answersHtml = '';
+    if (!poll.is_anonymous && poll.text_voters && poll.text_voters.length) {
+      answersHtml = `
+        <div class="border-t border-gray-100 dark:border-[#2e2e2e] pt-3 mt-3 space-y-3">
+          <div class="text-sm font-medium">Ответы:</div>
+          ${poll.text_voters.map(v => `
+            <div class="flex gap-2">
+              <a href="/profile/${v.user.id}" class="flex-shrink-0">${voterAvatar(v.user)}</a>
+              <div class="min-w-0">
+                <a href="/profile/${v.user.id}" class="text-sm hover:text-indigo-600">${escapeHtml(v.user.full_name || v.user.username)}</a>
+                <div class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">${escapeHtml(v.text_answer || '')}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else if (poll.is_anonymous) {
+      answersHtml = `<div class="text-xs text-gray-400 pt-2">Анонимные ответы скрыты</div>`;
+    }
+    results.innerHTML = `
+      <div class="text-sm text-gray-600 dark:text-gray-400 mb-2">Ваш ответ:</div>
+      <div class="text-sm whitespace-pre-wrap mb-3">${escapeHtml(poll.text_answer || '')}</div>
+      <button type="button" onclick="deletePollVote()" class="text-sm text-red-600">Удалить ответ</button>
+      ${answersHtml}
+    `;
+    return;
+  }
+
+  const total = poll.total_voters || 0;
+  let html = '';
+  poll.options.forEach(opt => {
+    const count = opt.votes || 0;
+    const percent = total ? Math.round((count / total) * 100) : 0;
+    const isMine = poll.user_votes.includes(opt.id);
+    const votersHtml = !poll.is_anonymous && opt.voters && opt.voters.length
+      ? `<div class="flex flex-wrap items-center gap-2 mt-2">
+          ${opt.voters.map(u => `
+            <a href="/profile/${u.id}" title="${escapeHtml(u.full_name || u.username)}" class="flex items-center gap-1.5">
+              ${voterAvatar(u)}
+              <span class="text-xs text-gray-600 dark:text-gray-400 hover:text-indigo-600">${escapeHtml(u.full_name || u.username)}</span>
+            </a>
+          `).join('')}
+        </div>`
+      : (poll.is_anonymous ? '<div class="text-xs text-gray-400 mt-1">Анонимно</div>' : '');
+    html += `
+      <div class="pb-3">
+        <div class="flex justify-between text-sm mb-1">
+          <span>${escapeHtml(opt.label)} ${isMine ? '· вы' : ''}</span>
+          <span class="text-gray-500">${count} · ${percent}%</span>
+        </div>
+        <div class="w-full bg-gray-200 dark:bg-[#333] rounded-full h-2 mb-2">
+          <div class="bg-indigo-600 h-2 rounded-full" style="width: ${percent}%"></div>
+        </div>
+        ${votersHtml}
+      </div>
+    `;
+  });
+  html += `<div class="text-xs text-gray-400 pt-1">Всего голосов: ${total}</div>`;
+  if (hasVoted(poll)) {
+    html += `<button type="button" onclick="deletePollVote()" class="text-sm text-red-600 mt-2">Удалить голос</button>`;
+  }
+  results.innerHTML = html;
+}
+
+async function submitPollVote() {
+  const pollRes = await fetch(`/api/announcements/${postId}/poll`, { cache: 'no-store' });
+  if (!pollRes.ok) return;
+  const poll = await pollRes.json();
+
+  let body;
+  if (poll.poll_type === 'text') {
+    const text = document.getElementById('poll-text-answer').value.trim();
+    if (!text) {
+      showToast('Введите ответ', 'error');
+      return;
+    }
+    body = new URLSearchParams({ text_answer: text });
+  } else {
+    const inputs = document.querySelectorAll('.poll-vote-input:checked');
+    const ids = Array.from(inputs).map(i => i.value);
+    if (!ids.length) {
+      showToast('Выберите вариант', 'error');
+      return;
+    }
+    if (poll.poll_type === 'single' && ids.length !== 1) {
+      showToast('Выберите один вариант', 'error');
+      return;
+    }
+    body = new URLSearchParams({ option_ids: JSON.stringify(ids.map(Number)) });
+  }
+
+  const res = await fetch(`/api/announcements/${postId}/poll/vote`, { method: 'POST', body });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const err = await res.json();
+    showToast(err.detail || 'Ошибка', 'error');
+  }
+}
+
+async function deletePollVote() {
+  const res = await fetch(`/api/announcements/${postId}/poll/vote`, { method: 'DELETE' });
+  if (res.ok) {
+    location.reload();
+  } else {
+    showToast('Ошибка', 'error');
+  }
+}
+
+const REACTION_LABELS = {
+  like: '👍', love: '❤️', laugh: '😂', wow: '😮', sad: '😢', fire: '🔥'
+};
+
+function renderReactions(reactions) {
+  const bar = document.getElementById('reactions-bar');
+  if (!bar) return;
+  let html = '';
+  for (const [key, label] of Object.entries(REACTION_LABELS)) {
+    const count = reactions.counts[key] || 0;
+    const active = reactions.user_reactions.includes(key);
+    html += `
+      <button type="button" data-reaction="${key}"
+        class="reaction-btn inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-sm border transition ${active ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-700' : 'bg-gray-50 dark:bg-[#272727] border-gray-200 dark:border-[#333]'} hover:bg-gray-100 dark:hover:bg-[#333]">
+        <span>${label}</span>
+        ${count ? `<span class="reaction-count text-xs text-gray-600 dark:text-gray-400">${count}</span>` : ''}
+      </button>`;
+  }
+  bar.innerHTML = html;
+  attachReactionHandlers(bar, reactions);
+}
+
+function attachReactionHandlers(bar, reactions) {
+  bar.querySelectorAll('.reaction-btn').forEach(btn => {
+    const reaction = btn.dataset.reaction;
+    let pressTimer;
+    let isLongPress = false;
+    const countEl = btn.querySelector('.reaction-count');
+
+    function startPress(e) {
+      if (e.type === 'touchstart') e.preventDefault();
+      isLongPress = false;
+      pressTimer = setTimeout(() => {
+        isLongPress = true;
+        if ((reactions.counts[reaction] || 0) > 0) {
+          showReactionUsers(reaction);
+        }
+      }, 700);
+    }
+
+    function endPress(e) {
+      clearTimeout(pressTimer);
+      if (!isLongPress) {
+        toggleReaction(reaction);
+      }
+    }
+
+    function cancelPress() {
+      clearTimeout(pressTimer);
+    }
+
+    btn.addEventListener('touchstart', startPress, {passive: false});
+    btn.addEventListener('touchend', endPress);
+    btn.addEventListener('mousedown', startPress);
+    btn.addEventListener('mouseup', endPress);
+    btn.addEventListener('mouseleave', cancelPress);
+
+    if (countEl) {
+      countEl.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if ((reactions.counts[reaction] || 0) > 0) showReactionUsers(reaction);
+      });
+    }
+  });
+}
+
+async function toggleReaction(reaction) {
+  const activeBtn = document.querySelector(`#reactions-bar button[data-reaction="${reaction}"]`);
+  const isActive = activeBtn && activeBtn.classList.contains('bg-indigo-50');
+  const method = isActive ? 'DELETE' : 'POST';
+  const url = isActive ? `/api/announcements/${postId}/reactions/${reaction}` : `/api/announcements/${postId}/reactions`;
+  const body = isActive ? undefined : new URLSearchParams({ reaction });
+  const res = await fetch(url, { method, body });
+  if (res.ok) {
+    const data = await res.json();
+    renderReactions(data.reactions);
+  } else {
+    showToast('Ошибка', 'error');
+  }
+}
+
+async function showReactionUsers(reaction) {
+  const res = await fetch(`/api/announcements/${postId}/reactions/${reaction}`, { cache: 'no-store' });
+  if (!res.ok) return;
+  const data = await res.json();
+  const modal = document.getElementById('reaction-users-modal');
+  document.getElementById('reaction-users-title').textContent = `${data.label} — ${data.users.length}`;
+  const list = document.getElementById('reaction-users-list');
+  if (!data.users.length) {
+    list.innerHTML = '<div class="text-sm text-gray-400">Пока никто</div>';
+  } else {
+    list.innerHTML = data.users.map(u => {
+      const avatar = u.avatar
+        ? `<img src="/static/avatars/${escapeHtml(u.avatar)}" class="w-8 h-8 rounded-full object-cover flex-shrink-0"/>`
+        : `<div class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-xs font-bold flex-shrink-0">${escapeHtml((u.full_name || u.username).charAt(0))}</div>`;
+      return `
+        <a href="/profile/${u.id}" class="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-[#272727]">
+          ${avatar}
+          <div class="min-w-0">
+            <div class="text-sm font-medium truncate">${escapeHtml(u.full_name || u.username)}</div>
+            <div class="text-xs text-gray-500">${roleLabel(u.role)}</div>
+          </div>
+        </a>`;
+    }).join('');
+  }
+  modal.classList.remove('hidden');
+}
+
+function closeReactionUsers() {
+  document.getElementById('reaction-users-modal').classList.add('hidden');
+}
+
+async function loadPost() {
+  const res = await fetch(`/api/announcements/${postId}`, { cache: 'no-store' });
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.reactions) renderReactions(data.reactions);
+}
+
+loadPost();
+loadPoll();
+</script>
+{% endblock %}

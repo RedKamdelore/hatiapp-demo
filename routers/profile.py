@@ -2,7 +2,7 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, Depends, Form, UploadFile, File
+from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -129,7 +129,19 @@ def public_profile(username: str, request: Request, db: Session = Depends(get_db
     target = db.query(models.User).filter_by(username=username).first()
     if not target:
         return RedirectResponse("/schedule", status_code=302)
+    return _render_public_profile(request, db, viewer, target)
 
+
+@router.get("/profile/{user_id:int}", response_class=HTMLResponse)
+def public_profile_by_id(user_id: int, request: Request, db: Session = Depends(get_db)):
+    viewer = get_current_user(request, db)
+    target = db.query(models.User).filter_by(id=user_id).first()
+    if not target:
+        return RedirectResponse("/schedule", status_code=302)
+    return _render_public_profile(request, db, viewer, target)
+
+
+def _render_public_profile(request, db, viewer, target):
     # Для точного 24h-чека в шаблоне
     cancel_cutoff = datetime.now() + timedelta(hours=24)
 
@@ -180,3 +192,60 @@ def cancel_booking_from_profile(
         return RedirectResponse(f"{back}?success=1", status_code=302)
     from urllib.parse import quote
     return RedirectResponse(f"{back}?error={quote(msg)}", status_code=302)
+
+
+@router.get("/api/my-upcoming-shifts")
+def my_upcoming_shifts(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    now = datetime.now()
+    bookings = (
+        db.query(models.Booking)
+        .join(models.Slot)
+        .filter(models.Booking.user_id == user.id)
+        .filter(models.Slot.date >= now.date())
+        .order_by(models.Slot.date, models.Slot.time)
+        .all()
+    )
+    result = []
+    for b in bookings:
+        slot_dt = datetime.combine(b.slot.date, b.slot.time)
+        result.append({
+            "booking_id": b.id,
+            "slot_id": b.slot.id,
+            "direction": b.slot.direction.name,
+            "date": b.slot.date.isoformat(),
+            "time": b.slot.time.strftime("%H:%M"),
+            "datetime_iso": slot_dt.isoformat(),
+        })
+    return result
+
+
+@router.get("/api/users/{user_id}/upcoming-shifts")
+def user_upcoming_shifts(user_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    target = db.query(models.User).filter_by(id=user_id, is_active=True).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    now = datetime.now()
+    bookings = (
+        db.query(models.Booking)
+        .join(models.Slot)
+        .filter(
+            models.Booking.user_id == user_id,
+            models.Slot.date > now.date(),
+        )
+        .order_by(models.Slot.date, models.Slot.time)
+        .all()
+    )
+
+    return [
+        {
+            "booking_id": b.id,
+            "slot_id": b.slot.id,
+            "direction": b.slot.direction.name,
+            "date": b.slot.date.isoformat(),
+            "time": str(b.slot.time),
+        }
+        for b in bookings
+    ]

@@ -144,7 +144,7 @@
   <a href="/chat" class="text-gray-400 hover:text-gray-600">← Назад</a>
   <div class="flex-1">
     <h1 class="text-xl font-bold text-gray-800">
-      {{ target.full_name or target.username }}
+      <a href="/profile/@{{ target.username }}" class="hover:text-indigo-600 transition">{{ target.full_name or target.username }}</a>
       {% if target.role == 'lotos' %}<span class="text-pink-400">🌸</span>{% endif %}
     </h1>
     <p class="text-xs text-gray-400">
@@ -188,6 +188,10 @@
     <input type="file" name="file" id="chat-file" class="hidden" accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleFileSelect(this)"/>
   </label>
   
+  {% if user.role == 'volunteer' and target.role == 'volunteer' %}
+  <button type="button" id="exchange-btn" onclick="openExchangeModal()" class="bg-gray-100 hover:bg-gray-200 rounded-2xl px-3 py-3 text-sm transition" title="Поменяться сменой">🔄</button>
+  {% endif %}
+  
   <input type="text" name="text" id="chat-input"
     placeholder="Написать сообщение..."
     autocomplete="off"
@@ -202,7 +206,10 @@
 </div>
 
 {% endif %}
+{% endblock %}
 
+{% block extra_scripts %}
+<script src="/static/chat-exchange.js"></script>
 <script>
 const ME = {{ user.id }};
 const USER_ROLE = "{{ user.role }}";
@@ -447,8 +454,10 @@ function renderMessages() {
     col.style.cssText = 'max-width:78%;display:flex;flex-direction:column;align-items:' + (isMe ? 'flex-end' : 'flex-start');
 
     if (!isMe) {
-      const name = document.createElement('p');
-      name.style.cssText = 'font-size:11px;color:#9ca3af;margin-bottom:2px;margin-left:4px';
+      const name = document.createElement('a');
+      name.href = '/profile/@' + (m.sender_username || '');
+      name.style.cssText = 'font-size:11px;color:#9ca3af;margin-bottom:2px;margin-left:4px;text-decoration:none;';
+      name.className = 'hover:text-indigo-500 transition';
       let nameText = m.sender_name;
       if (isLotos) nameText += ' 🌸';
       if (isAdmin) nameText += ' 👑';
@@ -471,6 +480,19 @@ function renderMessages() {
       bubbleStyle += 'background:#f3f4f6;color:#1f2937;border-bottom-left-radius:4px;';
     }
     bubble.style.cssText = bubbleStyle;
+    
+    // Обмен сменами — специальная карточка
+    if (m.payload && m.payload.type === 'exchange_proposal') {
+      bubble.innerHTML = renderExchangeCard(m);
+      bubble.style.cursor = 'default';
+      bubble.style.userSelect = 'text';
+      bubble.style.webkitUserSelect = 'text';
+      row.appendChild(bubble);
+      col.appendChild(row);
+      wrap.appendChild(col);
+      box.appendChild(wrap);
+      return;
+    }
     
     // Reply блок
     if (m.reply_to_id && m.reply_text) {
@@ -610,9 +632,14 @@ function searchUsers(query) {
         }
         resultsEl.innerHTML = '';
         users.forEach(function(u) {
-          const div = document.createElement('a');
-          div.href = '/chat/with/' + u.id;
-          div.className = 'flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl transition';
+          const div = document.createElement('div');
+          div.className = 'flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl transition cursor-pointer';
+          div.style.cssText = 'pointer-events: auto; position: relative; z-index: 1; touch-action: manipulation; -webkit-tap-highlight-color: transparent;';
+          div.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            location.href = '/chat/with/' + u.id;
+          };
           const initial = (u.full_name || u.username)[0].toUpperCase();
           div.innerHTML = 
             '<div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm flex-shrink-0">' + initial + '</div>' +
@@ -634,6 +661,10 @@ if (document.getElementById('new-chat-modal')) {
   document.getElementById('new-chat-modal').addEventListener('click', function(e) {
     if (e.target === this) closeNewChat();
   });
+  const results = document.getElementById('search-results');
+  if (results) {
+    results.addEventListener('click', function(e) { e.stopPropagation(); });
+  }
 }
 
 // ── WebSocket real-time ────────────────────────────────────────────────────
@@ -764,9 +795,30 @@ if (document.getElementById('new-chat-modal')) {
 {% endblock %}
 
 {% block modals %}
+<!-- Модалка обмена сменами -->
+<div id="exchange-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4" style="pointer-events: auto;" onclick="if (event.target === this) closeExchangeModal()">
+  <div class="bg-white dark:bg-[#1e1e1e] w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4 space-y-4" style="pointer-events: auto;">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-bold">Обмен сменами</h2>
+      <button onclick="closeExchangeModal()" class="text-gray-500">✕</button>
+    </div>
+    <div id="exchange-step-1" class="space-y-2">
+      <p class="text-sm text-gray-600">Выберите свою смену:</p>
+      <select id="exchange-my-booking" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"></select>
+      <button onclick="loadReceiverBookings()" class="w-full bg-indigo-600 text-white py-2 rounded-lg">Далее</button>
+    </div>
+    <div id="exchange-step-2" class="hidden space-y-2">
+      <p class="text-sm text-gray-600">Выберите смену собеседника:</p>
+      <select id="exchange-their-booking" class="w-full border rounded-lg px-3 py-2 dark:bg-[#181818]"></select>
+      <button onclick="submitExchange()" class="w-full bg-indigo-600 text-white py-2 rounded-lg">Предложить обмен</button>
+    </div>
+    <div id="exchange-error" class="text-sm text-red-600 hidden"></div>
+  </div>
+</div>
+
 <!-- Модалка нового чата -->
-<div id="new-chat-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-end sm:items-center justify-center p-4">
-  <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+<div id="new-chat-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-end sm:items-center justify-center p-4" style="pointer-events: auto;" onclick="if (event.target === this) closeNewChat()">
+  <div class="bg-white rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col" style="pointer-events: auto;">
     <div class="p-4 border-b border-gray-100 flex items-center justify-between">
       <h2 class="text-lg font-bold text-gray-800">Новый чат</h2>
       <button onclick="closeNewChat()" class="text-gray-400 hover:text-gray-600 text-xl">×</button>
@@ -776,7 +828,7 @@ if (document.getElementById('new-chat-modal')) {
         class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
         oninput="searchUsers(this.value)">
     </div>
-    <div id="search-results" class="flex-1 overflow-y-auto px-4 pb-4">
+    <div id="search-results" class="flex-1 overflow-y-auto px-4 pb-4" style="pointer-events: auto;">
       <!-- Результаты поиска -->
     </div>
   </div>

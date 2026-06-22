@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Request, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Request, Depends, Form
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import distinct, func
@@ -162,6 +162,14 @@ def direction_slots(direction_id: int, slot_date: str,
 
     booking_counts = get_booking_counts_batch(db)
 
+    # IDs направлений, которыми руководит текущий пользователь
+    leader_direction_ids = set()
+    if user.role == ROLE_LEADER:
+        leader_direction_ids = {
+            dl.direction_id for dl in
+            db.query(models.DirectionLeader).filter_by(user_id=user.id).all()
+        }
+
     slot_data = []
     for slot in slots:
         if slot.capacity == 0:
@@ -170,11 +178,16 @@ def direction_slots(direction_id: int, slot_date: str,
         free = slot.capacity - booked
         pct = int(booked / slot.capacity * 100) if slot.capacity else 0
         is_booked = slot.id in user_booking_ids
+        can_edit_description = (
+            user.role in {ROLE_ADMIN, ROLE_LOTOS}
+            or (user.role == ROLE_LEADER and slot.direction_id in leader_direction_ids)
+        )
         slot_data.append({
             "slot": slot,
             "stats": {"booked": booked, "free": free, "percent": pct},
             "is_booked": is_booked,
             "booking_id": user_booking_ids.get(slot.id),
+            "can_edit_description": can_edit_description,
         })
 
     # Проверка заблокированного дня
@@ -268,3 +281,32 @@ def my_bookings(request: Request, db: Session = Depends(get_db)):
         "cutoff_time": cancel_cutoff.time(),
         "error": error,
     })
+
+
+@router.post("/api/slot/{slot_id}/description")
+def update_slot_description(
+    slot_id: int,
+    request: Request,
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    slot = db.query(models.Slot).filter_by(id=slot_id).first()
+    if not slot:
+        return JSONResponse({"error": "Slot not found"}, status_code=404)
+
+    # Права: admin/lotos — любой; leader — только свои направления
+    if user.role not in {ROLE_ADMIN, ROLE_LOTOS}:
+        if user.role == ROLE_LEADER:
+            is_leader = db.query(models.DirectionLeader).filter_by(
+                direction_id=slot.direction_id, user_id=user.id
+            ).first()
+            if not is_leader:
+                return JSONResponse({"error": "Forbidden"}, status_code=403)
+        else:
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+
+    slot.description = description.strip() or None
+    db.commit()
+    return JSONResponse({"ok": True, "description": slot.description})
+

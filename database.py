@@ -12,6 +12,7 @@ engine = create_engine(
 with engine.connect() as conn:
     conn.execute(text("PRAGMA journal_mode=WAL"))
     conn.execute(text("PRAGMA synchronous=NORMAL"))
+    conn.execute(text("PRAGMA foreign_keys=ON"))
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 

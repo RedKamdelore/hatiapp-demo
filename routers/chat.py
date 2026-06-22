@@ -403,6 +403,7 @@ async def websocket_chat(websocket: WebSocket):
                         "id": db_msg.id,
                         "sender_id": user_id,
                         "sender_name": user.full_name or user.username,
+                        "sender_username": user.username,
                         "sender_role": user.role,
                         "sender_avatar": user.avatar,
                         "receiver_id": receiver_id,
@@ -472,3 +473,56 @@ async def websocket_chat(websocket: WebSocket):
         except:
             pass
         db.close()
+
+
+@router.get("/api/unread-chat-count")
+def unread_chat_count(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    user_id = user.id
+    lotos_ids = get_all_lotos_ids(db)
+
+    total_unread = 0
+
+    if user.role == ROLE_LOTOS:
+        # Лотос видит непрочитанные от обычных пользователей
+        all_ids = set()
+        sent = db.query(models.ChatMessage.receiver_id).filter(
+            models.ChatMessage.sender_id == user_id
+        ).distinct().all()
+        received = db.query(models.ChatMessage.sender_id).filter(
+            models.ChatMessage.receiver_id.in_(lotos_ids)
+        ).distinct().all()
+        for (uid,) in sent | received:
+            if uid not in lotos_ids:
+                all_ids.add(uid)
+
+        for uid in all_ids:
+            read_record = db.query(models.ChatRead).filter_by(
+                user_id=user_id, other_id=uid
+            ).first()
+            q = db.query(func.count(models.ChatMessage.id)).filter(
+                models.ChatMessage.sender_id == uid,
+                models.ChatMessage.receiver_id.in_(lotos_ids),
+            )
+            if read_record:
+                q = q.filter(models.ChatMessage.created_at > read_record.read_at)
+            total_unread += q.scalar() or 0
+
+    else:
+        # Обычный пользователь — непрочитанные от всех отправителей
+        senders = db.query(models.ChatMessage.sender_id).filter(
+            models.ChatMessage.receiver_id == user_id
+        ).distinct().all()
+        for (sender_id,) in senders:
+            read_record = db.query(models.ChatRead).filter_by(
+                user_id=user_id, other_id=sender_id
+            ).first()
+            q = db.query(func.count(models.ChatMessage.id)).filter(
+                models.ChatMessage.sender_id == sender_id,
+                models.ChatMessage.receiver_id == user_id,
+            )
+            if read_record:
+                q = q.filter(models.ChatMessage.created_at > read_record.read_at)
+            total_unread += q.scalar() or 0
+
+    return JSONResponse({"unread": total_unread})

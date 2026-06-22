@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}История действий{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex items-center justify-between">
+  <h1 class="text-xl font-bold text-gray-800">История действий</h1>
+  <a href="/admin" class="text-sm text-indigo-600 hover:text-indigo-700">← Назад в админку</a>
+</div>
+
+<div class="panel-card overflow-hidden">
+  <div class="panel-header">
+    <span class="panel-title">📋 Массовые действия</span>
+    <span class="text-xs text-gray-500">{{ total }} записей</span>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Время</th>
+          <th>Админ</th>
+          <th>Действие</th>
+          <th>Обработано</th>
+          <th>Детали</th>
+          <th>IP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="text-xs text-gray-500 whitespace-nowrap">{{ log.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+          <td>{{ log.admin.full_name or log.admin.username }}</td>
+          <td>{{ log.action }}</td>
+          <td class="text-center">{{ log.target_count }}</td>
+          <td class="text-xs text-gray-500 max-w-xs truncate" title="{{ log.details }}">{{ log.details or '—' }}</td>
+          <td class="text-xs text-gray-500">{{ log.ip_address or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% if not logs %}
+        <tr>
+          <td colspan="6" class="text-center text-sm text-gray-400 py-8">История действий пуста</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if total_pages > 1 %}
+  <div class="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}" class="text-sm text-indigo-600 hover:text-indigo-700">← Назад</a>
+    {% else %}
+    <span class="text-sm text-gray-400">← Назад</span>
+    {% endif %}
+
+    <span class="text-sm text-gray-600">Страница {{ page }} из {{ total_pages }}</span>
+
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}" class="text-sm text-indigo-600 hover:text-indigo-700">Вперёд →</a>
+    {% else %}
+    <span class="text-sm text-gray-400">Вперёд →</span>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

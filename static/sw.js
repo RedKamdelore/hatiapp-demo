@@ -1,60 +1,67 @@
-const CACHE_NAME = 'hatiapp-v8';
+const CACHE_NAME = 'hatiapp-v15';
 
-// Static assets to cache during install
+// Static assets to precache on install
 const PRECACHE_URLS = [
   '/static/manifest.json',
   '/static/favicon.svg',
   '/static/icon-192.png',
   '/static/icon-512.png',
+  '/static/tailwind.min.js',
 ];
 
-console.log('[SW] Script loaded');
+// HTML pages that should be available offline
+const OFFLINE_PAGES = [
+  '/',
+  '/schedule',
+  '/me',
+  '/leader',
+  '/announcements',
+  '/profile',
+  '/chat',
+  '/logs',
+  '/admin',
+  '/slots',
+];
 
-// Install - cache static assets
+function isOfflinePage(url) {
+  if (url.pathname === '/') return true;
+  if (OFFLINE_PAGES.includes(url.pathname)) return true;
+  if (url.pathname.startsWith('/leader/')) return true;
+  if (url.pathname.startsWith('/a/')) return true;
+  return false;
+}
+
+function isStatic(url) {
+  return url.pathname.startsWith('/static/') || url.pathname === '/api/theme.css';
+}
+
+function isApi(url) {
+  return url.pathname.startsWith('/api/') || url.pathname.startsWith('/sse/');
+}
+
+// Install - precache static shell
 self.addEventListener('install', (event) => {
-  console.log('[SW] Install event');
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Caching static assets');
-      return cache.addAll(PRECACHE_URLS);
-    }).then(() => {
-      console.log('[SW] Install complete');
-    }).catch((err) => {
-      console.error('[SW] Install failed:', err);
-    })
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
-// Activate - clean OLD caches only (keep current)
+// Activate - clean old caches
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activate event');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    caches.keys().then((cacheNames) =>
+      Promise.all(
         cacheNames
           .filter((name) => name.startsWith('hatiapp-') && name !== CACHE_NAME)
-          .map((name) => {
-            console.log('[SW] Deleting old cache:', name);
-            return caches.delete(name);
-          })
-      );
-    }).then(() => {
-      console.log('[SW] Claiming clients');
-      return self.clients.claim();
-    }).then(() => {
-      console.log('[SW] Activate complete - controlling pages');
-      // Log what's in cache
-      return caches.open(CACHE_NAME).then(cache => {
-        return cache.keys().then(requests => {
-          console.log('[SW] Cached URLs:', requests.map(r => r.url));
-        });
-      });
-    })
+          .map((name) => caches.delete(name))
+      )
+    ).then(() => self.clients.claim())
   );
 });
 
-// Offline page fallback
+// Offline fallback HTML
 const OFFLINE_HTML = `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -72,72 +79,144 @@ const OFFLINE_HTML = `<!DOCTYPE html>
     button:hover { background: #4338ca; }
     a { display: block; width: 100%; background: #f3f4f6; color: #374151; text-decoration: none; padding: 12px; border-radius: 8px; font-size: 16px; }
     a:hover { background: #e5e7eb; }
-    .hint { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af; }
   </style>
 </head>
 <body>
   <div class="box">
     <div class="icon">📡</div>
     <h1>Нет связи</h1>
-    <p>Вы не в лагере или отсутствует подключение к WiFi.<br>Подключитесь к сети чтобы продолжить.</p>
+    <p>Страница не была сохранена для офлайн-режима.</p>
     <button onclick="location.reload()">🔄 Обновить страницу</button>
     <a href="javascript:history.back()">← Назад</a>
-    <div class="hint">Расписание доступно только в лагере.</div>
   </div>
-  <script>
-    setInterval(() => { if (navigator.onLine) location.reload(); }, 3000);
-  </script>
 </body>
 </html>`;
+
+async function cacheStatic(request, cache) {
+  const cached = await cache.match(request);
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok) {
+      cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (error) {
+    if (cached) return cached;
+    return new Response('', { status: 503 });
+  }
+}
+
+async function staleWhileRevalidate(request, cache) {
+  const cached = await cache.match(request);
+  const fetchPromise = fetch(request).then((networkResponse) => {
+    if (networkResponse.ok) {
+      cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  }).catch(() => cached);
+
+  if (cached) {
+    fetchPromise.catch(() => {});
+    return cached;
+  }
+
+  try {
+    return await fetchPromise;
+  } catch (error) {
+    return new Response(OFFLINE_HTML, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+}
 
 // Fetch handler
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  
-  // Skip non-GET and SW itself
+
   if (request.method !== 'GET') return;
   if (url.pathname === '/sw.js') return;
-  
+  if (isApi(url)) return;
+
   event.respondWith(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      const cached = await cache.match(request);
-      
-      if (cached) {
-        return cached;
+    caches.open(CACHE_NAME).then((cache) => {
+      if (isStatic(url)) {
+        return cacheStatic(request, cache);
       }
-      
-      try {
-        const response = await fetch(request);
-        
-        if (response.ok && response.status === 200) {
-          // Cache HTML pages and static assets
-          if (request.mode === 'navigate' || 
-              url.pathname.startsWith('/static/') ||
-              url.pathname === '/') {
-            cache.put(request, response.clone());
-          }
-        }
-        
-        return response;
-      } catch (error) {
-        // For navigation requests, return offline page
-        if (request.mode === 'navigate') {
-          return new Response(OFFLINE_HTML, {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' }
-          });
-        }
-        
-        return new Response('', { status: 503 });
+      if (isOfflinePage(url)) {
+        return staleWhileRevalidate(request, cache);
       }
+      return fetch(request).catch(() => cache.match(request).then(cached => cached || new Response('', { status: 503 })));
     })
   );
 });
 
-// Listen for skipWaiting
-self.addEventListener('message', (event) => {
-  console.log('[SW] Message received:', event.data);
-  if (event.data === 'skipWaiting') {
-    self.skipWaiting();
+// Push notifications
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let data = {};
+  try { data = event.data.json(); } catch (e) {}
+
+  const title = data.type === 'announcement'
+    ? 'HatiApp — объявление'
+    : data.title || 'HatiApp';
+  const body = data.type === 'announcement'
+    ? (data.title || 'Новое объявление')
+    : (data.body || '');
+  const url = data.type === 'announcement'
+    ? (data.post_id ? '/a/' + data.post_id : '/announcements')
+    : (data.url || '/');
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: body,
+      icon: '/static/icon-192.png',
+      badge: '/static/icon-192.png',
+      data: { url: url },
+    })
+  );
+});
+
+// Background sync
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'check-reminders') {
+    event.waitUntil(
+      fetch('/api/my-upcoming-shifts', { credentials: 'include' })
+        .then(r => r.json())
+        .then(shifts => {
+          const now = new Date();
+          const notifications = [];
+          shifts.forEach(s => {
+            const slotTime = new Date(s.datetime_iso);
+            const diffMin = (slotTime - now) / (1000 * 60);
+            if (diffMin > 0 && diffMin <= 2 * 60) {
+              notifications.push(
+                self.registration.showNotification('HatiApp — напоминание', {
+                  body: `${s.direction}: смена через 2 часа в ${s.time}`,
+                  icon: '/static/icon-192.png',
+                })
+              );
+            }
+          });
+          return Promise.all(notifications);
+        })
+        .catch(() => {})
+    );
   }
+});
+
+// Notification click
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data && event.notification.data.url ? event.notification.data.url : '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(clientList => {
+        if (clientList.length > 0) {
+          clientList[0].navigate(url);
+          return clientList[0].focus();
+        }
+        return self.clients.openWindow(url);
+      })
+  );
 });

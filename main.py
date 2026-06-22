@@ -3,8 +3,9 @@ import ssl
 import sys
 from pathlib import Path
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi.middleware import SlowAPIMiddleware
@@ -15,7 +16,8 @@ import models
 from database import engine
 from services.rate_limit import limiter
 from services.auth import hash_password
-from routers import auth, schedule, leader, admin, profile, chat, sse, logs, slots
+from services.exchange import expire_pending_proposals
+from routers import auth, schedule, leader, admin, profile, chat, sse, logs, slots, announcements, exchange
 from database import SessionLocal
 
 
@@ -55,7 +57,23 @@ app.include_router(profile.router)
 app.include_router(chat.router)
 app.include_router(sse.router)
 app.include_router(logs.router)
+app.include_router(announcements.router)
+app.include_router(announcements.api_router)
+app.include_router(exchange.router)
 app.include_router(slots.router)
+
+
+def _expire_exchange_proposals_job():
+    db = SessionLocal()
+    try:
+        expire_pending_proposals(db)
+    finally:
+        db.close()
+
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(_expire_exchange_proposals_job, "interval", minutes=1)
+scheduler.start()
 
 
 @app.get("/seed")
@@ -98,11 +116,15 @@ def serve_sw():
 
 @app.exception_handler(401)
 def unauthorized(request: Request, exc):
+    if request.url.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({"detail": "Не авторизован"}, status_code=401)
     return RedirectResponse("/")
 
 
 @app.exception_handler(403)
 def forbidden(request: Request, exc):
+    if request.url.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JSONResponse({"detail": "Нет доступа"}, status_code=403)
     return RedirectResponse("/")
 
 
