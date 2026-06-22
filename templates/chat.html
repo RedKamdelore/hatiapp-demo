@@ -469,7 +469,7 @@ function renderMessages() {
     row.style.cssText = 'display:flex;align-items:flex-end;gap:4px;' + (isMe ? 'flex-direction:row-reverse;' : '');
 
     const bubble = document.createElement('div');
-    let bubbleStyle = 'padding:8px 12px;border-radius:18px;font-size:0.875rem;line-height:1.5;cursor:pointer;user-select:none;-webkit-user-select:none;';
+    let bubbleStyle = 'padding:8px 12px;border-radius:18px;font-size:0.875rem;line-height:1.5;cursor:pointer;user-select:none;-webkit-user-select:none;max-width:100%;box-sizing:border-box;overflow:hidden;';
     if (isMe) {
       bubbleStyle += 'background:#4f46e5;color:#fff;border-bottom-right-radius:4px;';
     } else if (isLotos) {

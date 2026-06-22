@@ -137,20 +137,20 @@ function renderExchangeCard(msg) {
   }
 
   return (
-    '<div class="p-3 rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/40 dark:border-indigo-700 min-w-[220px] text-gray-900 dark:text-gray-100">' +
+    '<div class="p-3 rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/40 dark:border-indigo-700 max-w-full text-gray-900 dark:text-gray-100" style="box-sizing:border-box;min-width:0;">' +
       '<div class="text-xs font-bold text-indigo-700 dark:text-indigo-200 mb-2">🔄 Обмен сменами</div>' +
-      '<div class="flex items-center justify-between gap-2 text-sm mb-1">' +
+      '<div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-1 sm:gap-2 text-sm mb-1">' +
         '<div class="text-center flex-1 min-w-0">' +
           '<div class="text-xs text-gray-600 dark:text-gray-300">' + (isSender ? 'Вы' : 'Собеседник') + '</div>' +
-          '<div class="font-medium text-gray-900 dark:text-gray-100 truncate">' + formatSlot(mySlot) + '</div>' +
+          '<div class="font-medium text-gray-900 dark:text-gray-100 text-xs sm:text-sm break-words leading-tight">' + formatSlot(mySlot) + '</div>' +
         '</div>' +
-        '<div class="text-gray-500 dark:text-gray-400 flex-shrink-0">→</div>' +
+        '<div class="text-gray-500 dark:text-gray-400 flex-shrink-0 text-center text-xs leading-none py-1">→</div>' +
         '<div class="text-center flex-1 min-w-0">' +
           '<div class="text-xs text-gray-600 dark:text-gray-300">' + (isSender ? 'Собеседник' : 'Вы') + '</div>' +
-          '<div class="font-medium text-gray-900 dark:text-gray-100 truncate">' + formatSlot(theirSlot) + '</div>' +
+          '<div class="font-medium text-gray-900 dark:text-gray-100 text-xs sm:text-sm break-words leading-tight">' + formatSlot(theirSlot) + '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="flex items-center gap-2 mt-2">' + actionsHtml + '</div>' +
+      '<div class="flex flex-wrap items-center gap-2 mt-2">' + actionsHtml + '</div>' +
       '<div class="text-[10px] text-gray-500 dark:text-gray-400 mt-1 text-right">' + msg.time + '</div>' +
     '</div>'
   );
