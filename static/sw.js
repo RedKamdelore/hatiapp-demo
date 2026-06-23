@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hatiapp-v16';
+const CACHE_NAME = 'hatiapp-v17';
 
 // Static assets to precache on install
 const PRECACHE_URLS = [
@@ -96,20 +96,45 @@ async function cacheStatic(request, cache) {
   const cached = await cache.match(request);
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse.ok) {
+    if (networkResponse && networkResponse.status === 200) {
       cache.put(request, networkResponse.clone());
     }
-    return networkResponse;
+    if (networkResponse && networkResponse.ok) {
+      return networkResponse;
+    }
+    if (cached) return cached;
+    return networkResponse || new Response('', { status: 503 });
   } catch (error) {
     if (cached) return cached;
     return new Response('', { status: 503 });
   }
 }
 
+async function networkFirst(request, cache) {
+  // Always try network first for HTML pages so the user sees fresh content.
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse && networkResponse.status === 200) {
+      cache.put(request, networkResponse.clone());
+      return networkResponse;
+    }
+    // Non-200 network response: return cached version if we have one.
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    return networkResponse;
+  } catch (error) {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    return new Response(OFFLINE_HTML, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+}
+
 async function staleWhileRevalidate(request, cache) {
   const cached = await cache.match(request);
   const fetchPromise = fetch(request).then((networkResponse) => {
-    if (networkResponse.ok) {
+    if (networkResponse && networkResponse.status === 200) {
       cache.put(request, networkResponse.clone());
     }
     return networkResponse;
@@ -121,7 +146,11 @@ async function staleWhileRevalidate(request, cache) {
   }
 
   try {
-    return await fetchPromise;
+    const response = await fetchPromise;
+    if (response) return response;
+    return new Response(OFFLINE_HTML, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
   } catch (error) {
     return new Response(OFFLINE_HTML, {
       headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -144,7 +173,7 @@ self.addEventListener('fetch', (event) => {
         return cacheStatic(request, cache);
       }
       if (isOfflinePage(url)) {
-        return staleWhileRevalidate(request, cache);
+        return networkFirst(request, cache);
       }
       return fetch(request).catch(() => cache.match(request).then(cached => cached || new Response('', { status: 503 })));
     })
